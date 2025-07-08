@@ -1,4 +1,5 @@
 # Default Configuration for PyTorch Training and Inference Pipeline
+# This configuration contains ALL available options for the TARDIS emulator training system
 
 # Data Configuration
 data:
@@ -12,6 +13,7 @@ data:
   keep_v_outer: true
   
   # Data splitting
+  limit_nsamples: 100 # load first limit_nsamples samples from the input and output hdf5 files
   train_split: 0.8
   val_split: 0.1
   test_split: 0.1
@@ -34,9 +36,9 @@ data:
 
 # Model Configuration
 model:
-  model_type: "mlp"
-  input_dim: 20  # Will be determined automatically from data
-  output_dim: 1000  # Will be determined automatically from data
+  model_type: "mlp"  # Options: mlp, transformer, cnn, etc.
+  input_dim: null  # Will be determined automatically from data
+  output_dim: null  # Will be determined automatically from data
   
   # MLP-specific configuration
   hidden_dims: [512, 256, 128]
@@ -49,13 +51,13 @@ model:
 training:
   # Basic training settings
   epochs: 100
-  task_type: "regression"  # Options: regression, classification, binary_classification
-  num_classes: null  # Required for classification tasks
   
   # Loss function
   loss:
-    type: "mse"  # Options: mse, mae, huber, cross_entropy, bce, bce_with_logits
-    
+    type: "mse"  # Options: mse, mae, huber
+    # For huber loss:
+    # delta: 1.0
+  
   # Optimizer settings
   optimizer:
     type: "adam"  # Options: adam, adamw, sgd, rmsprop, adagrad, adadelta
@@ -66,40 +68,100 @@ training:
     beta2: 0.999
     eps: 1.0e-8
     amsgrad: false
+    # For SGD:
+    # momentum: 0.9
+    # nesterov: true
+    # For RMSprop:
+    # alpha: 0.99
+    # momentum: 0.0
+    # centered: false
   
   # Learning rate scheduler
   scheduler:
     type: "reduce_on_plateau"  # Options: none, step, multistep, exponential, cosine, cosine_warm_restarts, reduce_on_plateau, cyclic, one_cycle, linear
+    step_mode: "epoch"  # 'epoch' or 'batch'
     mode: "min"  # min for loss, max for accuracy
     factor: 0.5
     patience: 10
     threshold: 1.0e-4
     min_lr: 1.0e-6
+    # For step scheduler:
+    # step_size: 30
+    # gamma: 0.1
+    # For multistep scheduler:
+    # milestones: [30, 80]
+    # gamma: 0.1
+    # For exponential scheduler:
+    # gamma: 0.95
+    # For cosine scheduler:
+    # T_max: 100
+    # eta_min: 1e-6
+    # For cosine_warm_restarts:
+    # T_0: 10
+    # T_mult: 2
+    # eta_min: 1e-6
+    # For cyclic scheduler:
+    # base_lr: 1e-4
+    # max_lr: 1e-2
+    # step_size_up: 2000
+    # step_size_down: 2000
+    # mode: 'triangular'
+    # For one_cycle scheduler:
+    # max_lr: 1e-2
+    # total_steps: 1000
+    # pct_start: 0.3
+    # anneal_strategy: 'cos'
+    # For linear scheduler:
+    # start_factor: 1.0
+    # end_factor: 0.1
+    # total_iters: 100
   
-  # Early stopping
+  # Early stopping callback
   early_stopping:
     enabled: true
     patience: 20
     min_delta: 1.0e-6
-    mode: "min"  # min for loss, max for accuracy
+    mode: "min"  # 'min' for metrics where lower is better, 'max' for higher is better
     restore_best_weights: true
+    monitor: "val_loss"  # Metric to monitor for early stopping
   
-  # Gradient clipping
-  gradient_clipping: null  # Set to a value like 1.0 to enable
+  # Gradient clipping callback
+  gradient_clipping: null  # Set to a value like 1.0 to enable, null to disable
   
-  # Checkpointing
+  # Checkpointing callback
   checkpointing:
     enabled: true
     checkpoint_dir: "checkpoints"
     max_checkpoints: 5
+    monitor: "val_loss"  # Metric to monitor for best checkpoint
+    mode: "min"  # 'min' for metrics where lower is better, 'max' for higher is better
+    save_best_only: true  # Only save best checkpoint, false to save all checkpoints
   
-  # Logging
+  # Logging callback
   logging:
     enabled: true
     log_dir: "logs"
     experiment_name: "default_experiment"
     use_tensorboard: true
-    log_level: "INFO"
+    log_every_n_batches: 10  # Log every N batches during training
+    log_level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  
+  # Diagnostic plotting callback for training curves and validation samples
+  diagnostic_plotting_curves:
+    enabled: true
+    plot_dir: "plots"
+    num_validation_samples: 5  # Number of validation samples to plot (1-10 recommended)
+    update_frequency: 5  # Update plots every N epochs
+    wavelength_range: [3500, 7000]  # Wavelength range for plotting (Angstroms)
+    seed: 42  # Random seed for selecting validation samples to track (for reproducible sample selection)
+  
+  # Diagnostic plotting callback for pairwise input analysis
+  diagnostic_plotting_pairplot:
+    enabled: true
+    plot_dir: "plots"
+    update_frequency: 10  # Update plots every N epochs (less frequent due to compute cost)
+    num_bins: 20  # Number of bins for X and Y axes in the histogram/contour plot
+    input_scaler: null  # Scaler for inverse transforming inputs (if preprocessing was applied)
 
 # Inference Configuration
 inference:
@@ -113,7 +175,7 @@ inference:
   
   # Prediction settings
   batch_size: 64
-  return_probabilities: false
+  return_probabilities: false  # Not applicable for regression
   
   # Output settings
   output_format: "csv"  # Options: csv, json, pickle
@@ -123,14 +185,16 @@ inference:
 evaluation:
   metrics:
     - "mse"           # Primary: (Y-Y_pred)^2 for TARDIS spectrum emulation
-    - "rmse" 
-    - "mae"
-    - "r2"
+    - "rmse"          # Root Mean Squared Error
+    - "mae"           # Mean Absolute Error
+    - "mape"          # Mean Absolute Percentage Error
+    - "r2"            # R-squared (coefficient of determination)
+    - "explained_variance"  # Explained variance score
+    - "max_error"     # Maximum error
   
   # Visualization
   plot_training_curves: true
   plot_predictions: true
-  save_confusion_matrix: false  # For classification tasks
   
   # Results directory
   results_dir: "results"
@@ -152,4 +216,9 @@ experiment:
   use_amp: false
   
   # Distributed training
-  distributed: false 
+  distributed: false
+
+# Scaler configuration (for inverse transformation in plotting)
+# This should be the same scaler used during data preprocessing
+scaler:
+  type: "standard"  # 'standard', 'minmax', 'robust'

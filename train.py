@@ -159,7 +159,8 @@ def main():
             v_start_kms=data_config.get('v_start_kms', 3000),
             v0_kms=data_config.get('v0_kms', 5000),
             t0_day=data_config.get('t0_day', 5),
-            keep_v_outer=data_config.get('keep_v_outer', True)
+            keep_v_outer=data_config.get('keep_v_outer', True),
+            limit_nsamples=data_config.get('limit_nsamples', None)
         )
         
         # Create dataloaders
@@ -193,16 +194,38 @@ def main():
         model = create_model(config, data_info)
         model.print_model_summary()
         
-        # Create trainer
-        logger.info("Setting up trainer...")
-        trainer = Trainer(model, config.config, device)
+        # Prepare config for trainer with scaler for diagnostic plotting
+        trainer_config = config.config.copy()
+        
+        # Add scalers to config for diagnostic plotting callbacks
+        if preprocessor is not None and hasattr(preprocessor, 'scaler'):
+            trainer_config['scaler'] = preprocessor.scaler
+            # For pairwise analysis, we might need input scaler if inputs were preprocessed
+            if hasattr(preprocessor, 'input_scaler'):
+                trainer_config['input_scaler'] = preprocessor.input_scaler
+            logger.info("Added scalers to config for diagnostic plotting")
+        else:
+            logger.info("No scalers available for diagnostic plotting")
+        
+        # Create trainer with callback system
+        logger.info("Setting up trainer with callback system...")
+        trainer = Trainer(model, trainer_config, device)
+        
+        # Log callback configuration
+        training_config = config.get_training_config()
+        logger.info("Callback configuration:")
+        logger.info(f"  Early stopping: {training_config.get('early_stopping', {}).get('enabled', False)}")
+        logger.info(f"  Checkpointing: {training_config.get('checkpointing', {}).get('enabled', True)}")
+        logger.info(f"  Logging: {training_config.get('logging', {}).get('enabled', True)}")
+        logger.info(f"  Training curves plotting: {training_config.get('diagnostic_plotting_curves', {}).get('enabled', True)}")
+        logger.info(f"  Pairwise input analysis: {training_config.get('diagnostic_plotting_pairplot', {}).get('enabled', True)}")
+        logger.info(f"  Gradient clipping: {training_config.get('gradient_clipping') is not None}")
         
         if args.dry_run:
             logger.info("Dry run complete. Exiting without training.")
             return
         
         # Start training
-        training_config = config.get_training_config()
         epochs = training_config.get('epochs', 100)
         
         logger.info(f"Starting training for {epochs} epochs...")
@@ -227,7 +250,13 @@ def main():
         logger.info(f"  Best epoch: {summary['best_epoch']}")
         logger.info(f"  Total epochs: {summary['total_epochs']}")
         
+        # Log output directories
         logger.info("Training completed successfully!")
+        logger.info("Check the following directories for outputs:")
+        logger.info(f"  - Training curves plots: {training_config.get('diagnostic_plotting_curves', {}).get('plot_dir', 'plots')}")
+        logger.info(f"  - Pairwise analysis plots: {training_config.get('diagnostic_plotting_pairplot', {}).get('plot_dir', 'plots')}")
+        logger.info(f"  - Logs: {training_config.get('logging', {}).get('log_dir', 'logs')}")
+        logger.info(f"  - Checkpoints: {training_config.get('checkpointing', {}).get('checkpoint_dir', 'checkpoints')}")
         
     except Exception as e:
         logger.error(f"Training failed with error: {str(e)}")

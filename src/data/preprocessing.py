@@ -39,6 +39,17 @@ class DataPreprocessor:
         else:
             raise ValueError(f"Unknown preprocessing method: {method}")
     
+    @property
+    def scaler(self):
+        """Get the output scaler for inverse transformation in diagnostic plotting.
+        
+        Returns:
+            Output scaler object or None if not fitted
+        """
+        if self.is_fitted and self.output_scaler is not None:
+            return self.output_scaler
+        return None
+    
     def fit(
         self,
         input_data: torch.Tensor,
