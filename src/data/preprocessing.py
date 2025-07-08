@@ -58,8 +58,8 @@ class DataPreprocessor:
             return self
         
         # Convert tensors to numpy for sklearn
-        input_np = input_data.numpy() if isinstance(input_data, torch.Tensor) else input_data
-        output_np = output_data.numpy() if isinstance(output_data, torch.Tensor) else output_data
+        input_np = input_data.detach().cpu().numpy() if isinstance(input_data, torch.Tensor) else input_data
+        output_np = output_data.detach().cpu().numpy() if isinstance(output_data, torch.Tensor) else output_data
         
         # Fit scalers
         if self.input_scaler is not None:
@@ -89,11 +89,11 @@ class DataPreprocessor:
             return input_data
         
         # Convert to numpy, transform, convert back
-        input_np = input_data.numpy() if isinstance(input_data, torch.Tensor) else input_data
+        input_np = input_data.detach().cpu().numpy() if isinstance(input_data, torch.Tensor) else input_data
         transformed_np = self.input_scaler.transform(input_np)
         
         if isinstance(input_data, torch.Tensor):
-            return torch.tensor(transformed_np, dtype=input_data.dtype)
+            return torch.tensor(transformed_np, dtype=input_data.dtype, device=input_data.device)
         else:
             return transformed_np
     
@@ -113,11 +113,11 @@ class DataPreprocessor:
             return output_data
         
         # Convert to numpy, transform, convert back
-        output_np = output_data.numpy() if isinstance(output_data, torch.Tensor) else output_data
+        output_np = output_data.detach().cpu().numpy() if isinstance(output_data, torch.Tensor) else output_data
         transformed_np = self.output_scaler.transform(output_np)
         
         if isinstance(output_data, torch.Tensor):
-            return torch.tensor(transformed_np, dtype=output_data.dtype)
+            return torch.tensor(transformed_np, dtype=output_data.dtype, device=output_data.device)
         else:
             return transformed_np
     
@@ -137,11 +137,11 @@ class DataPreprocessor:
             return input_data
         
         # Convert to numpy, inverse transform, convert back
-        input_np = input_data.numpy() if isinstance(input_data, torch.Tensor) else input_data
+        input_np = input_data.detach().cpu().numpy() if isinstance(input_data, torch.Tensor) else input_data
         original_np = self.input_scaler.inverse_transform(input_np)
         
         if isinstance(input_data, torch.Tensor):
-            return torch.tensor(original_np, dtype=input_data.dtype)
+            return torch.tensor(original_np, dtype=input_data.dtype, device=input_data.device)
         else:
             return original_np
     
@@ -161,11 +161,11 @@ class DataPreprocessor:
             return output_data
         
         # Convert to numpy, inverse transform, convert back
-        output_np = output_data.numpy() if isinstance(output_data, torch.Tensor) else output_data
+        output_np = output_data.detach().cpu().numpy() if isinstance(output_data, torch.Tensor) else output_data
         original_np = self.output_scaler.inverse_transform(output_np)
         
         if isinstance(output_data, torch.Tensor):
-            return torch.tensor(original_np, dtype=output_data.dtype)
+            return torch.tensor(original_np, dtype=output_data.dtype, device=output_data.device)
         else:
             return original_np
     

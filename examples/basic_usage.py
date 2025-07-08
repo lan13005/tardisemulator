@@ -5,6 +5,9 @@ import sys
 import os
 import torch
 
+# Set PyTorch to use double precision (float64) everywhere
+torch.set_default_dtype(torch.float64)
+
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 

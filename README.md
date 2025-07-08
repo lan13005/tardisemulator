@@ -19,11 +19,6 @@ git clone <repository-url>
 cd TardisEmulator
 ```
 
-2. Install dependencies:
-```bash
-uv add torch torchvision torchaudio pandas numpy scikit-learn h5py pyyaml tensorboard
-```
-
 ## Quick Start
 
 ### 1. Prepare Your Data

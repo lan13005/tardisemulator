@@ -168,11 +168,11 @@ class Predictor:
         if isinstance(inputs, torch.Tensor):
             input_tensor = inputs
         elif isinstance(inputs, np.ndarray):
-            input_tensor = torch.tensor(inputs, dtype=torch.float32)
+            input_tensor = torch.tensor(inputs, dtype=torch.float64)
         elif isinstance(inputs, pd.DataFrame):
-            input_tensor = torch.tensor(inputs.values, dtype=torch.float32)
+            input_tensor = torch.tensor(inputs.values, dtype=torch.float64)
         elif isinstance(inputs, list):
-            input_tensor = torch.tensor(inputs, dtype=torch.float32)
+            input_tensor = torch.tensor(inputs, dtype=torch.float64)
         else:
             raise ValueError(f"Unsupported input type: {type(inputs)}")
         
@@ -366,7 +366,7 @@ class Predictor:
         
         # Prepare input
         if not isinstance(input_sample, torch.Tensor):
-            input_sample = torch.tensor(input_sample, dtype=torch.float32)
+            input_sample = torch.tensor(input_sample, dtype=torch.float64)
         
         if input_sample.dim() == 1:
             input_sample = input_sample.unsqueeze(0)

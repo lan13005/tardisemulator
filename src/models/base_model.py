@@ -52,7 +52,7 @@ class BaseModel(nn.Module, ABC):
             'output_dim': self.output_dim,
             'total_parameters': total_params,
             'trainable_parameters': trainable_params,
-            'model_size_mb': total_params * 4 / (1024 * 1024),  # Assuming float32
+            'model_size_mb': total_params * 8 / (1024 * 1024),  # Assuming float64
             'config': self.config
         }
     

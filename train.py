@@ -8,6 +8,9 @@ import torch
 import logging
 from pathlib import Path
 
+# Set PyTorch to use double precision (float64) everywhere
+torch.set_default_dtype(torch.float64)
+
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
@@ -142,9 +145,17 @@ def main():
         logger.info("Setting up data loading...")
         data_config = config.get_data_config()
         
+        # Setup preprocessing
+        preprocessing_config = data_config.get('preprocessing', {})
+        preprocessor = None
+        if preprocessing_config.get('method', 'standard') != 'none':
+            logger.info("Setting up data preprocessing...")
+            preprocessor = DataPreprocessor(method=preprocessing_config['method'])
+        
         data_loader = HDF5DataLoader(
             input_file=data_config['input_file'],
             output_file=data_config['output_file'],
+            preprocessor=preprocessor,
             v_start_kms=data_config.get('v_start_kms', 3000),
             v0_kms=data_config.get('v0_kms', 5000),
             t0_day=data_config.get('t0_day', 5),
@@ -168,32 +179,14 @@ def main():
                    f"{data_info['input_dim']} input features, "
                    f"{data_info['output_dim']} output features")
         
-        # Setup preprocessing
-        preprocessing_config = data_config.get('preprocessing', {})
-        if preprocessing_config.get('method', 'standard') != 'none':
-            logger.info("Setting up data preprocessing...")
-            preprocessor = DataPreprocessor(method=preprocessing_config['method'])
-            
-            # Fit preprocessor on training data
-            train_inputs = []
-            train_outputs = []
-            for batch_inputs, batch_outputs in train_loader:
-                train_inputs.append(batch_inputs)
-                train_outputs.append(batch_outputs)
-            
-            all_train_inputs = torch.cat(train_inputs, dim=0)
-            all_train_outputs = torch.cat(train_outputs, dim=0)
-            
-            preprocessor.fit(all_train_inputs, all_train_outputs)
-            logger.info(f"Preprocessor fitted with method: {preprocessing_config['method']}")
-            
-            # Save preprocessor
+        # Save preprocessor if used
+        if preprocessor is not None:
             preprocessor_path = os.path.join(
                 config.get('training.checkpointing.checkpoint_dir', 'checkpoints'),
                 'preprocessor.pkl'
             )
             os.makedirs(os.path.dirname(preprocessor_path), exist_ok=True)
-            preprocessor.save_scalers(preprocessor_path)
+            data_loader.save_preprocessor(preprocessor_path)
         
         # Create model
         logger.info("Creating model...")

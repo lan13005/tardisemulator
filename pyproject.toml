@@ -16,4 +16,6 @@ dependencies = [
     "torchaudio>=2.7.1",
     "torchvision>=0.22.1",
     "tables>=3.8.0",
+    "ipython>=9.4.0",
+    "ipykernel>=6.29.5",
 ]

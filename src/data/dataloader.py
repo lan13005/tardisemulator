@@ -7,6 +7,7 @@ import h5py
 from torch.utils.data import Dataset, DataLoader
 from typing import Tuple, Optional, Dict, Any
 import logging
+from .preprocessing import DataPreprocessor
 
 
 def drop_tardis_grid_units(df):
@@ -27,7 +28,7 @@ def get_M_total_from_grid(df_parameters, v_start_kms, v0_kms, t0_day, v_outer_in
 
 
 def convert_unitless_tardis_grid_to_parameters(
-    df_tardis_grid, v_start_kms, v0_kms, t0_day, keep_v_outer=False
+    df_tardis_grid, v_start_kms, v0_kms, t0_day, keep_v_outer=False, logger: logging.Logger = None,
 ):
     """Convert TARDIS grid to parameter format.
     
@@ -44,12 +45,16 @@ def convert_unitless_tardis_grid_to_parameters(
     Returns:
         Processed DataFrame with parameters suitable for ML training
     """
+    
+    if logger is None:
+        logger = logging.getLogger('pytorch_pipeline')
+    
     df_grid = df_tardis_grid.copy()
     
     # Drop units if present
     if hasattr(df_grid["model.structure.density.rho_0"].values[0], "unit"):
         df_grid = drop_tardis_grid_units(df_grid)
-        print("Dropping the units from the tardis grid")
+        logger.info("Dropping the units from the tardis grid")
     
     # Drop calculated columns that are not free parameters
     df_parameters = df_grid.drop(
@@ -60,7 +65,7 @@ def convert_unitless_tardis_grid_to_parameters(
     mass_fractions_columns = [
         col for col in df_parameters.columns if col.startswith("model.abundances.")
     ]
-    print(f"Converting to elemental mass and remove the rho_0 and v_outer parameter...")
+    logger.info(f"Converting to elemental mass and remove the rho_0 and v_outer parameter...")
     
     # Calculate total mass and get rid of rho_0 and v_outer
     if keep_v_outer:
@@ -179,27 +184,33 @@ class HDF5DataLoader:
         self,
         input_file: str,
         output_file: str,
+        preprocessor: Optional[DataPreprocessor] = None,
         v_start_kms: float = 3000,
         v0_kms: float = 5000,
         t0_day: float = 5,
-        keep_v_outer: bool = True
+        keep_v_outer: bool = True,
+        limit_nsamples: int = None,
     ):
         """Initialize HDF5DataLoader.
         
         Args:
             input_file: Path to input HDF5 file
             output_file: Path to output HDF5 file
+            preprocessor: Optional DataPreprocessor instance for scaling data
             v_start_kms: Starting velocity parameter
             v0_kms: Reference velocity parameter
             t0_day: Reference time parameter
             keep_v_outer: Whether to keep outer velocity parameter
+            limit_nsamples: Limit the number of samples to load
         """
         self.input_file = input_file
         self.output_file = output_file
+        self.preprocessor = preprocessor
         self.v_start_kms = v_start_kms
         self.v0_kms = v0_kms
         self.t0_day = t0_day
         self.keep_v_outer = keep_v_outer
+        self.limit_nsamples = limit_nsamples
         self.logger = logging.getLogger('pytorch_pipeline')
         
         # Data storage
@@ -215,10 +226,16 @@ class HDF5DataLoader:
             Tuple of (input_df, output_df)
         """
         self.logger.info(f"Loading input data from {self.input_file}")
-        df_input = pd.read_hdf(self.input_file)
+        if self.limit_nsamples is not None:
+            df_input = pd.read_hdf(self.input_file, stop=self.limit_nsamples)
+        else:
+            df_input = pd.read_hdf(self.input_file)
         
         self.logger.info(f"Loading output data from {self.output_file}")
-        df_output = pd.read_hdf(self.output_file)
+        if self.limit_nsamples is not None:
+            df_output = pd.read_hdf(self.output_file, stop=self.limit_nsamples)
+        else:
+            df_output = pd.read_hdf(self.output_file)
         
         # Process input data using TARDIS conversion
         self.logger.info("Processing TARDIS grid data")
@@ -227,7 +244,8 @@ class HDF5DataLoader:
             self.v_start_kms, 
             self.v0_kms, 
             self.t0_day, 
-            keep_v_outer=self.keep_v_outer
+            keep_v_outer=self.keep_v_outer,
+            logger=self.logger
         )
         
         # Store feature and target names
@@ -244,7 +262,7 @@ class HDF5DataLoader:
         self,
         input_df: pd.DataFrame,
         output_df: pd.DataFrame,
-        dtype: torch.dtype = torch.float32
+        dtype: torch.dtype = torch.float64
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Convert DataFrames to PyTorch tensors.
         
@@ -257,8 +275,8 @@ class HDF5DataLoader:
             Tuple of (input_tensor, output_tensor)
         """
         # Convert to numpy arrays first
-        input_array = input_df.values.astype(np.float32)
-        output_array = output_df.values.astype(np.float32)
+        input_array = input_df.values.astype(np.float64)
+        output_array = output_df.values.astype(np.float64)
         
         # Convert to tensors
         input_tensor = torch.tensor(input_array, dtype=dtype)
@@ -324,7 +342,7 @@ class HDF5DataLoader:
         if self.input_data is None or self.output_data is None:
             raise ValueError("Data not loaded. Call load_data() first.")
         
-        return {
+        info = {
             'input_shape': self.input_data.shape,
             'output_shape': self.output_data.shape,
             'input_dim': self.input_data.shape[1],
@@ -333,6 +351,32 @@ class HDF5DataLoader:
             'feature_names': self.feature_names,
             'target_names': self.target_names
         }
+        
+        # Add preprocessor information if available
+        if self.preprocessor is not None and self.preprocessor.is_fitted:
+            info['preprocessor'] = self.preprocessor.get_scaler_info()
+        
+        return info
+    
+    def save_preprocessor(self, filepath: str) -> None:
+        """Save the fitted preprocessor to disk.
+        
+        Args:
+            filepath: Path where to save the preprocessor
+        """
+        if self.preprocessor is not None and self.preprocessor.is_fitted:
+            self.preprocessor.save_scalers(filepath)
+            self.logger.info(f"Preprocessor saved to: {filepath}")
+        else:
+            self.logger.warning("No fitted preprocessor to save")
+    
+    def get_preprocessor(self) -> Optional[DataPreprocessor]:
+        """Get the preprocessor instance.
+        
+        Returns:
+            DataPreprocessor instance if available, None otherwise
+        """
+        return self.preprocessor
     
     def load_and_create_dataloaders(
         self,
@@ -389,6 +433,24 @@ class HDF5DataLoader:
         val_output = output_tensor[val_indices]
         test_input = input_tensor[test_indices]
         test_output = output_tensor[test_indices]
+        
+        # Apply preprocessing if preprocessor is provided
+        if self.preprocessor is not None:
+            self.logger.info("Applying data preprocessing...")
+            
+            # Fit preprocessor on training data only
+            self.preprocessor.fit(train_input, train_output)
+            self.logger.info(f"Preprocessor fitted with method: {self.preprocessor.method}")
+            
+            # Transform all splits
+            train_input = self.preprocessor.transform_input(train_input)
+            train_output = self.preprocessor.transform_output(train_output)
+            val_input = self.preprocessor.transform_input(val_input)
+            val_output = self.preprocessor.transform_output(val_output)
+            test_input = self.preprocessor.transform_input(test_input)
+            test_output = self.preprocessor.transform_output(test_output)
+            
+            self.logger.info("Data preprocessing completed")
         
         # Create datasets
         train_dataset = self.create_dataset(train_input, train_output)
