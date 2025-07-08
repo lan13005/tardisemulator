@@ -1,0 +1,156 @@
+# Default Configuration for PyTorch Training and Inference Pipeline
+
+# Data Configuration
+data:
+  input_file: "inputs/training_input_parameter_round18.h5"
+  output_file: "inputs/training_output_spectra_round18.h5"
+  
+  # TARDIS-specific parameters
+  v_start_kms: 3000
+  v0_kms: 5000
+  t0_day: 5
+  keep_v_outer: true
+  
+  # Data splitting
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+  
+  # DataLoader settings
+  batch_size: 32
+  shuffle: true
+  num_workers: 0
+  random_seed: 42
+  
+  # Preprocessing
+  preprocessing:
+    method: "standard"  # Options: standard, minmax, robust, none
+    
+  # Data augmentation (optional)
+  augmentation:
+    enabled: false
+    noise_std: 0.01
+    dropout_prob: 0.1
+
+# Model Configuration
+model:
+  model_type: "mlp"
+  input_dim: 20  # Will be determined automatically from data
+  output_dim: 1000  # Will be determined automatically from data
+  
+  # MLP-specific configuration
+  hidden_dims: [512, 256, 128]
+  activation: "relu"  # Options: relu, tanh, sigmoid, leaky_relu, gelu, swish
+  dropout_rate: 0.1
+  use_batch_norm: true
+  use_bias: true
+
+# Training Configuration
+training:
+  # Basic training settings
+  epochs: 100
+  task_type: "regression"  # Options: regression, classification, binary_classification
+  num_classes: null  # Required for classification tasks
+  
+  # Loss function
+  loss:
+    type: "mse"  # Options: mse, mae, huber, cross_entropy, bce, bce_with_logits
+    
+  # Optimizer settings
+  optimizer:
+    type: "adam"  # Options: adam, adamw, sgd, rmsprop, adagrad, adadelta
+    learning_rate: 0.001
+    weight_decay: 0.0
+    # Adam-specific parameters
+    beta1: 0.9
+    beta2: 0.999
+    eps: 1e-8
+    amsgrad: false
+  
+  # Learning rate scheduler
+  scheduler:
+    type: "reduce_on_plateau"  # Options: none, step, multistep, exponential, cosine, cosine_warm_restarts, reduce_on_plateau, cyclic, one_cycle, linear
+    mode: "min"  # min for loss, max for accuracy
+    factor: 0.5
+    patience: 10
+    threshold: 1e-4
+    min_lr: 1e-6
+  
+  # Early stopping
+  early_stopping:
+    enabled: true
+    patience: 20
+    min_delta: 1e-6
+    mode: "min"  # min for loss, max for accuracy
+    restore_best_weights: true
+  
+  # Gradient clipping
+  gradient_clipping: null  # Set to a value like 1.0 to enable
+  
+  # Checkpointing
+  checkpointing:
+    enabled: true
+    checkpoint_dir: "checkpoints"
+    max_checkpoints: 5
+  
+  # Logging
+  logging:
+    enabled: true
+    log_dir: "logs"
+    experiment_name: "default_experiment"
+    use_tensorboard: true
+    log_level: "INFO"
+
+# Inference Configuration
+inference:
+  # Model loading
+  model_path: null
+  config_path: null
+  
+  # Preprocessing
+  apply_preprocessing: true
+  preprocessor_path: null
+  
+  # Prediction settings
+  batch_size: 64
+  return_probabilities: false
+  
+  # Output settings
+  output_format: "csv"  # Options: csv, json, pickle
+  output_dir: "predictions"
+
+# Evaluation Configuration
+evaluation:
+  # Metrics to compute
+  metrics:
+    - "mse"
+    - "rmse" 
+    - "mae"
+    - "r2"
+  
+  # Visualization
+  plot_training_curves: true
+  plot_predictions: true
+  save_confusion_matrix: false  # For classification tasks
+  
+  # Results directory
+  results_dir: "results"
+
+# Experiment Configuration
+experiment:
+  name: "default_experiment"
+  description: "Default experiment configuration"
+  tags: ["baseline", "mlp"]
+  
+  # Reproducibility
+  random_seed: 42
+  deterministic: true
+  
+  # Device settings
+  device: "auto"  # Options: auto, cpu, cuda, cuda:0, etc.
+  
+  # Mixed precision training
+  use_amp: false
+  
+  # Distributed training
+  distributed: false 
