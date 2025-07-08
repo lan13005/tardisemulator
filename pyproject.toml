@@ -3,9 +3,17 @@ name = "tardisemulator"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 dependencies = [
+    "h5py>=3.14.0",
     "matplotlib>=3.10.3",
     "numpy>=2.3.1",
     "pandas>=2.3.0",
+    "pyyaml>=6.0.2",
+    "scikit-learn>=1.7.0",
+    "tensorboard>=2.19.0",
+    "torch>=2.7.1",
+    "torchaudio>=2.7.1",
+    "torchvision>=0.22.1",
+    "tables>=3.8.0",
 ]

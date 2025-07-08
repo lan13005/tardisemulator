@@ -53,6 +53,10 @@ training:
     type: "adam"
     learning_rate: 0.01  # Higher learning rate for faster convergence
     weight_decay: 0.0
+    beta1: 0.9
+    beta2: 0.999
+    eps: 1.0e-8
+    amsgrad: false
   
   # Simple scheduler
   scheduler:

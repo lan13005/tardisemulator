@@ -1,4 +1,4 @@
-"""Evaluation metrics for training and validation."""
+"""Evaluation metrics for training and validation - focused on regression tasks for TARDIS emulator."""
 
 import torch
 import torch.nn.functional as F
@@ -9,13 +9,14 @@ import logging
 
 
 class MetricsCalculator:
-    """Calculate various evaluation metrics for model performance."""
+    """Calculate evaluation metrics for model performance - optimized for regression tasks."""
     
     def __init__(self, task_type: str = 'regression', num_classes: Optional[int] = None):
         """Initialize MetricsCalculator.
         
         Args:
             task_type: Type of task ('regression', 'classification', 'binary_classification')
+                      Default is 'regression' as this is primarily for TARDIS spectrum emulation
             num_classes: Number of classes for classification tasks
         """
         self.task_type = task_type
@@ -35,11 +36,13 @@ class MetricsCalculator:
         predictions: torch.Tensor,
         targets: torch.Tensor
     ) -> Dict[str, float]:
-        """Calculate regression metrics.
+        """Calculate comprehensive regression metrics.
+        
+        This is the primary function for TARDIS spectrum emulation tasks.
         
         Args:
-            predictions: Model predictions
-            targets: Ground truth targets
+            predictions: Model predictions (Y_pred)
+            targets: Ground truth targets (Y)
             
         Returns:
             Dictionary of regression metrics
@@ -48,8 +51,8 @@ class MetricsCalculator:
         pred_np = predictions.detach().cpu().numpy()
         target_np = targets.detach().cpu().numpy()
         
-        # Mean Squared Error
-        mse = np.mean((pred_np - target_np) ** 2)
+        # Mean Squared Error (Y-Y_pred)^2 - Primary metric for TARDIS emulation
+        mse = np.mean((target_np - pred_np) ** 2)
         
         # Root Mean Squared Error
         rmse = np.sqrt(mse)
@@ -75,7 +78,7 @@ class MetricsCalculator:
         max_error = np.max(np.abs(pred_np - target_np))
         
         return {
-            'mse': float(mse),
+            'mse': float(mse),                          # Primary metric: (Y-Y_pred)^2
             'rmse': float(rmse),
             'mae': float(mae),
             'mape': float(np.mean(mape)),
@@ -330,7 +333,7 @@ class MetricsCalculator:
             Primary metric value
         """
         if self.task_type == 'regression':
-            return metrics.get('rmse', metrics.get('mse', 0))
+            return metrics.get('mse', 0) # Changed from rmse to mse
         elif self.task_type in ['classification', 'binary_classification']:
             return metrics.get('f1_weighted', metrics.get('f1', metrics.get('accuracy', 0)))
         else:
@@ -347,7 +350,7 @@ class MetricsCalculator:
             True if current is better than best
         """
         if self.task_type == 'regression':
-            # Lower is better for regression (RMSE, MSE)
+            # Lower is better for regression (MSE)
             return current < best
         else:
             # Higher is better for classification (accuracy, F1)

@@ -60,13 +60,13 @@ training:
   scheduler:
     type: "cosine"
     T_max: 200
-    eta_min: 1e-6
+    eta_min: 1.0e-6
   
   # Early stopping
   early_stopping:
     enabled: true
     patience: 30
-    min_delta: 1e-5
+    min_delta: 1.0e-5
     mode: "min"
     restore_best_weights: true
   

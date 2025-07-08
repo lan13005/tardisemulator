@@ -64,7 +64,7 @@ training:
     # Adam-specific parameters
     beta1: 0.9
     beta2: 0.999
-    eps: 1e-8
+    eps: 1.0e-8
     amsgrad: false
   
   # Learning rate scheduler
@@ -73,14 +73,14 @@ training:
     mode: "min"  # min for loss, max for accuracy
     factor: 0.5
     patience: 10
-    threshold: 1e-4
-    min_lr: 1e-6
+    threshold: 1.0e-4
+    min_lr: 1.0e-6
   
   # Early stopping
   early_stopping:
     enabled: true
     patience: 20
-    min_delta: 1e-6
+    min_delta: 1.0e-6
     mode: "min"  # min for loss, max for accuracy
     restore_best_weights: true
   
@@ -121,9 +121,8 @@ inference:
 
 # Evaluation Configuration
 evaluation:
-  # Metrics to compute
   metrics:
-    - "mse"
+    - "mse"           # Primary: (Y-Y_pred)^2 for TARDIS spectrum emulation
     - "rmse" 
     - "mae"
     - "r2"

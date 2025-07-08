@@ -75,7 +75,7 @@ def setup_device(device_str: str) -> torch.device:
     return device
 
 
-def setup_reproducibility(config: ConfigManager):
+def setup_reproducibility(config: ConfigManager, logger: logging.Logger):
     """Setup reproducibility settings."""
     experiment_config = config.get('experiment', {})
     random_seed = experiment_config.get('random_seed', 42)
@@ -93,7 +93,7 @@ def setup_reproducibility(config: ConfigManager):
         torch.backends.cudnn.benchmark = False
         os.environ['PYTHONHASHSEED'] = str(random_seed)
         
-        print(f"Reproducibility enabled with seed: {random_seed}")
+        logger.info(f"Reproducibility enabled with seed: {random_seed}")
 
 
 def create_model(config: ConfigManager, data_info: dict) -> MLP:
@@ -136,7 +136,7 @@ def main():
         logger.info(f"Using device: {device}")
         
         # Setup reproducibility
-        setup_reproducibility(config)
+        setup_reproducibility(config, logger)
         
         # Load data
         logger.info("Setting up data loading...")

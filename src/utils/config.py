@@ -119,8 +119,8 @@ class ConfigManager:
         training_config = self.config.get('training', {})
         if 'epochs' not in training_config:
             raise ValueError("Missing 'training.epochs' in configuration")
-        if 'learning_rate' not in training_config:
-            raise ValueError("Missing 'training.learning_rate' in configuration")
+        if 'learning_rate' not in training_config.get('optimizer', {}):
+            raise ValueError("Missing 'training.optimizer.learning_rate' in configuration")
     
     def get_data_config(self) -> Dict[str, Any]:
         """Get data configuration section."""
