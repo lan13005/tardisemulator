@@ -93,6 +93,12 @@ class DataPreprocessor:
         Returns:
             Transformed input tensor
         """
+        # Handle empty tensors gracefully (even if not fitted)
+        if isinstance(input_data, torch.Tensor) and input_data.shape[0] == 0:
+            return input_data  # Return empty tensor as-is
+        elif not isinstance(input_data, torch.Tensor) and len(input_data) == 0:
+            return input_data  # Return empty array as-is
+        
         if not self.is_fitted:
             raise ValueError("Preprocessor not fitted. Call fit() first.")
         
@@ -117,6 +123,12 @@ class DataPreprocessor:
         Returns:
             Transformed output tensor
         """
+        # Handle empty tensors gracefully (even if not fitted)
+        if isinstance(output_data, torch.Tensor) and output_data.shape[0] == 0:
+            return output_data  # Return empty tensor as-is
+        elif not isinstance(output_data, torch.Tensor) and len(output_data) == 0:
+            return output_data  # Return empty array as-is
+        
         if not self.is_fitted:
             raise ValueError("Preprocessor not fitted. Call fit() first.")
         
@@ -141,6 +153,12 @@ class DataPreprocessor:
         Returns:
             Original scale input tensor
         """
+        # Handle empty tensors gracefully (even if not fitted)
+        if isinstance(input_data, torch.Tensor) and input_data.shape[0] == 0:
+            return input_data  # Return empty tensor as-is
+        elif not isinstance(input_data, torch.Tensor) and len(input_data) == 0:
+            return input_data  # Return empty array as-is
+        
         if not self.is_fitted:
             raise ValueError("Preprocessor not fitted. Call fit() first.")
         
@@ -165,6 +183,12 @@ class DataPreprocessor:
         Returns:
             Original scale output tensor
         """
+        # Handle empty tensors gracefully (even if not fitted)
+        if isinstance(output_data, torch.Tensor) and output_data.shape[0] == 0:
+            return output_data  # Return empty tensor as-is
+        elif not isinstance(output_data, torch.Tensor) and len(output_data) == 0:
+            return output_data  # Return empty array as-is
+        
         if not self.is_fitted:
             raise ValueError("Preprocessor not fitted. Call fit() first.")
         

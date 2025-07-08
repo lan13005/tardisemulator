@@ -238,10 +238,12 @@ def main():
         )
         
         # Evaluate on test set
-        if test_loader is not None:
+        if test_loader is not None and len(test_loader.dataset) > 0:
             logger.info("Evaluating on test set...")
             test_results = trainer.test(test_loader)
             logger.info("Test evaluation completed")
+        else:
+            logger.info("No test data available, skipping test evaluation")
         
         # Print training summary
         summary = trainer.get_training_summary()
@@ -266,4 +268,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main() 
+    main()

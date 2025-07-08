@@ -143,7 +143,9 @@ class TardisDataset(Dataset):
         self,
         input_data: torch.Tensor,
         output_data: torch.Tensor,
-        transform: Optional[Any] = None
+        transform: Optional[Any] = None,
+        feature_names: Optional[list] = None,
+        target_names: Optional[list] = None
     ):
         """Initialize TardisDataset.
         
@@ -151,12 +153,16 @@ class TardisDataset(Dataset):
             input_data: Input features tensor
             output_data: Target values tensor
             transform: Optional data transformation
+            feature_names: List of feature names
+            target_names: List of target names
         """
         assert len(input_data) == len(output_data), "Input and output must have same length"
         
         self.input_data = input_data
         self.output_data = output_data
         self.transform = transform
+        self.feature_names = feature_names
+        self.target_names = target_names
         self.logger = logging.getLogger('pytorch_pipeline')
         
     def __len__(self) -> int:
@@ -303,7 +309,7 @@ class HDF5DataLoader:
         Returns:
             TardisDataset instance
         """
-        return TardisDataset(input_tensor, output_tensor, transform)
+        return TardisDataset(input_tensor, output_tensor, transform, self.feature_names, self.target_names)
     
     def create_dataloader(
         self,
@@ -429,10 +435,23 @@ class HDF5DataLoader:
         # Split data
         train_input = input_tensor[train_indices]
         train_output = output_tensor[train_indices]
-        val_input = input_tensor[val_indices]
-        val_output = output_tensor[val_indices]
-        test_input = input_tensor[test_indices]
-        test_output = output_tensor[test_indices]
+        
+        # Handle empty splits gracefully
+        if n_val > 0:
+            val_input = input_tensor[val_indices]
+            val_output = output_tensor[val_indices]
+        else:
+            # Create empty tensors with correct shape
+            val_input = input_tensor[:0]  # Empty tensor with same number of features
+            val_output = output_tensor[:0]  # Empty tensor with same number of features
+            
+        if n_test > 0:
+            test_input = input_tensor[test_indices]
+            test_output = output_tensor[test_indices]
+        else:
+            # Create empty tensors with correct shape
+            test_input = input_tensor[:0]  # Empty tensor with same number of features
+            test_output = output_tensor[:0]  # Empty tensor with same number of features
         
         # Apply preprocessing if preprocessor is provided
         if self.preprocessor is not None:
@@ -461,12 +480,24 @@ class HDF5DataLoader:
         train_loader = self.create_dataloader(
             train_dataset, batch_size, shuffle=shuffle, num_workers=num_workers
         )
-        val_loader = self.create_dataloader(
-            val_dataset, batch_size, shuffle=False, num_workers=num_workers
-        )
-        test_loader = self.create_dataloader(
-            test_dataset, batch_size, shuffle=False, num_workers=num_workers
-        )
+        
+        # Handle empty validation dataset
+        if len(val_dataset) > 0:
+            val_loader = self.create_dataloader(
+                val_dataset, batch_size, shuffle=False, num_workers=num_workers
+            )
+        else:
+            val_loader = None
+            self.logger.info("No validation data created (val_split=0)")
+            
+        # Handle empty test dataset
+        if len(test_dataset) > 0:
+            test_loader = self.create_dataloader(
+                test_dataset, batch_size, shuffle=False, num_workers=num_workers
+            )
+        else:
+            test_loader = None
+            self.logger.info("No test data created (test_split=0)")
         
         self.logger.info(f"Created dataloaders: Train={len(train_dataset)}, "
                         f"Val={len(val_dataset)}, Test={len(test_dataset)}")

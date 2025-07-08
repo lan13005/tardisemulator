@@ -105,7 +105,9 @@ class MLP(BaseModel):
             
             # Don't add activation, batch norm, or dropout to output layer
             if not is_output_layer:
-                # Batch normalization (before activation)
+                # Batch normalization
+                #   before activation, ReLU would half-rectify it which defeats purpose of zero-centering
+                #   this ensures ReLU would activate half the time maximizing gradient flow
                 if self.use_batch_norm:
                     layers.append(nn.BatchNorm1d(out_dim))
                 
@@ -113,6 +115,8 @@ class MLP(BaseModel):
                 layers.append(self._get_activation())
                 
                 # Dropout
+                #    must be after batch norm else BatchNorm stats will change and attempt to compensate for dropout
+                #    would introduce more noise
                 if self.dropout_rate > 0:
                     layers.append(nn.Dropout(self.dropout_rate))
         
@@ -194,7 +198,7 @@ class MLP(BaseModel):
             if isinstance(module, nn.Linear):
                 # Xavier/Glorot initialization for linear layers
                 if self.activation_name in ['relu', 'leaky_relu']:
-                    # He initialization for ReLU-like activations
+                    # Kaiming initialization for ReLU-like activations
                     nn.init.kaiming_normal_(module.weight, mode='fan_in', nonlinearity='relu')
                 else:
                     # Xavier initialization for other activations

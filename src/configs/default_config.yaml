@@ -1,5 +1,6 @@
 # Default Configuration for PyTorch Training and Inference Pipeline
 # This configuration contains ALL available options for the TARDIS emulator training system
+# See bottom of the file for Guidance comments
 
 # Data Configuration
 data:
@@ -13,13 +14,13 @@ data:
   keep_v_outer: true
   
   # Data splitting
-  limit_nsamples: 100 # load first limit_nsamples samples from the input and output hdf5 files
-  train_split: 0.8
-  val_split: 0.1
-  test_split: 0.1
+  limit_nsamples: null # load first limit_nsamples samples from hdf5 files, null to load all
+  train_split: 1.0
+  val_split: 0.0
+  test_split: 0.0
   
   # DataLoader settings
-  batch_size: 32
+  batch_size: 128
   shuffle: true
   num_workers: 0
   random_seed: 42
@@ -29,7 +30,7 @@ data:
     method: "standard"  # Options: standard, minmax, robust, none
     
   # Data augmentation (optional)
-  augmentation:
+augmentation:
     enabled: false
     noise_std: 0.01
     dropout_prob: 0.1
@@ -41,9 +42,9 @@ model:
   output_dim: null  # Will be determined automatically from data
   
   # MLP-specific configuration
-  hidden_dims: [512, 256, 128]
+  hidden_dims: [2048]
   activation: "relu"  # Options: relu, tanh, sigmoid, leaky_relu, gelu, swish
-  dropout_rate: 0.1
+  dropout_rate: 0.2
   use_batch_norm: true
   use_bias: true
 
@@ -151,7 +152,7 @@ training:
     enabled: true
     plot_dir: "plots"
     num_validation_samples: 5  # Number of validation samples to plot (1-10 recommended)
-    update_frequency: 5  # Update plots every N epochs
+    update_frequency: 10  # Update plots every N epochs, null = no plotting
     wavelength_range: [3500, 7000]  # Wavelength range for plotting (Angstroms)
     seed: 42  # Random seed for selecting validation samples to track (for reproducible sample selection)
   
@@ -159,7 +160,7 @@ training:
   diagnostic_plotting_pairplot:
     enabled: true
     plot_dir: "plots"
-    update_frequency: 10  # Update plots every N epochs (less frequent due to compute cost)
+    update_frequency: null  # Update plots every N epochs (less frequent due to compute cost), null = no plotting
     num_bins: 20  # Number of bins for X and Y axes in the histogram/contour plot
     input_scaler: null  # Scaler for inverse transforming inputs (if preprocessing was applied)
 
@@ -222,3 +223,14 @@ experiment:
 # This should be the same scaler used during data preprocessing
 scaler:
   type: "standard"  # 'standard', 'minmax', 'robust'
+
+
+# -------------------------------------------------- 
+# Guidance for overfitting a single training sample
+# 1. Turn off BatchNorm
+# - remember this is used between multiple layers. The inputs to each BatchNorm layer changes as the model learns!
+# - this injects noise that can make it hard to overfit a single sample
+# 2. Turn off Dropout
+# - in training mode, dropout randomly drops out some neurons
+# - in eval mode, dropout is not applied so the model learns some kind of average
+# -------------------------------------------------- 

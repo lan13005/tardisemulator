@@ -152,10 +152,13 @@ class Trainer:
             if 'scaler' in self.config:
                 scaler = self.config['scaler']
             
+            update_frequency = curves_config.get('update_frequency', 1)
+            if update_frequency is None:
+                update_frequency = None
             training_curves_callback = TrainingCurvesCallback(
                 plot_dir=curves_config.get('plot_dir', 'plots'),
                 num_validation_samples=curves_config.get('num_validation_samples', 5),
-                update_frequency=curves_config.get('update_frequency', 1),
+                update_frequency=update_frequency,
                 scaler=scaler,
                 wavelength_range=curves_config.get('wavelength_range', None),
                 seed=curves_config.get('seed', 42)
@@ -170,9 +173,12 @@ class Trainer:
             if 'input_scaler' in self.config:
                 input_scaler = self.config['input_scaler']
             
+            update_frequency = pairplot_config.get('update_frequency', 10)
+            if update_frequency is None:
+                update_frequency = None
             pairwise_analysis_callback = PairwiseInputAnalysisCallback(
                 plot_dir=pairplot_config.get('plot_dir', 'plots'),
-                update_frequency=pairplot_config.get('update_frequency', 10),
+                update_frequency=update_frequency,
                 num_bins=pairplot_config.get('num_bins', 20),
                 input_scaler=input_scaler
             )
@@ -316,6 +322,11 @@ class Trainer:
         """
         # Store data loaders for callbacks
         self.train_loader = train_loader
+        
+        # Handle validation: if no val_loader provided, use train_loader for validation (overfitting check)
+        if val_loader is None or len(val_loader.dataset) == 0:
+            self.logger.info("No validation data provided, using training data for validation (overfitting check)")
+            val_loader = train_loader
         self.val_loader = val_loader
         
         # Resume from checkpoint if specified
@@ -389,6 +400,10 @@ class Trainer:
         Returns:
             Test metrics
         """
+        if test_loader is None or len(test_loader.dataset) == 0:
+            self.logger.warning("No test data provided, skipping test evaluation")
+            return {}
+        
         self.logger.info("Evaluating on test set...")
         test_loss, test_metrics = self.validate_epoch(test_loader)
         

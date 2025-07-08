@@ -368,9 +368,7 @@ class TrainingCurvesCallback(Callback):
         # Ensure axes is always a list/array for consistent indexing
         if n_subplots == 1:
             self.axes = [self.axes]
-        
-        self.fig.suptitle('Training Diagnostics', fontsize=16)
-        
+                
         # Training curves subplot (first subplot)
         self.axes[0].set_title('Training Curves')
         self.axes[0].set_xlabel('Epoch')
@@ -394,6 +392,8 @@ class TrainingCurvesCallback(Callback):
     
     def on_epoch_end(self, trainer, epoch: int, train_metrics: Dict[str, float], val_metrics: Optional[Dict[str, float]]) -> None:
         """Update plots if it's time."""
+        if self.update_frequency is None:
+            return
         if epoch % self.update_frequency == 0:
             self._update_training_curves(trainer, epoch)
             if self.val_predictions is not None:
@@ -448,7 +448,17 @@ class TrainingCurvesCallback(Callback):
         history = trainer.metrics_callback.train_history
         
         self.axes[0].clear()
-        self.axes[0].set_title('Training Curves')
+        
+        # Get current average losses for title
+        current_train_loss = history['train_loss'][-1] if history['train_loss'] else 0.0
+        current_val_loss = history['val_loss'][-1] if history['val_loss'] and history['val_loss'][-1] is not None else None
+        
+        title = f'Training Curves (Train Loss: {current_train_loss:.6f}'
+        if current_val_loss is not None:
+            title += f', Val Loss: {current_val_loss:.6f}'
+        title += ')'
+        
+        self.axes[0].set_title(title)
         self.axes[0].set_xlabel('Epoch')
         self.axes[0].set_ylabel('Loss')
         self.axes[0].grid(True, alpha=0.3)
@@ -521,7 +531,7 @@ class TrainingCurvesCallback(Callback):
     
     def on_training_end(self, trainer) -> None:
         """Save final plots."""
-        if self.fig is not None:
+        if self.fig is not None and self.update_frequency is not None:
             final_plot_path = self.plot_dir / 'final_training_diagnostics.png'
             self.fig.savefig(final_plot_path, dpi=150, bbox_inches='tight')
             self.logger.info(f"Saved final diagnostic plots to {final_plot_path}")
@@ -561,6 +571,9 @@ class PairwiseInputAnalysisCallback(Callback):
         self.val_predictions = None
         self.val_losses = None
         
+        # Store feature names for proper labeling
+        self.feature_names = None
+        
         # Initialize plots
         self.fig, self.axes = None, None
         self._setup_plots()
@@ -583,6 +596,8 @@ class PairwiseInputAnalysisCallback(Callback):
     
     def on_epoch_end(self, trainer, epoch: int, train_metrics: Dict[str, float], val_metrics: Optional[Dict[str, float]]) -> None:
         """Update plots if it's time."""
+        if self.update_frequency is None:
+            return
         if epoch % self.update_frequency == 0:
             self._update_pairwise_analysis(trainer, epoch)
             self._save_plots(epoch)
@@ -612,11 +627,64 @@ class PairwiseInputAnalysisCallback(Callback):
             self.val_targets = torch.cat(all_targets, dim=0)
             self.val_predictions = torch.cat(all_predictions, dim=0)
             
+            # Get feature names from dataloader if available
+            self.feature_names = self._get_feature_names(val_loader)
+            
             # Determine number of input parameters and setup plots
             self.n_input_params = self.val_inputs.shape[1]
             self._create_plot_grid()
             
             self.logger.info(f"Stored {len(self.val_inputs)} validation samples for pairwise analysis with {self.n_input_params} input parameters")
+            if self.feature_names:
+                self.logger.info(f"Feature names: {self.feature_names}")
+    
+    def _get_feature_names(self, val_loader):
+        """Get feature names from the dataloader."""
+        try:
+            # Try to get feature names from the dataset
+            dataset = val_loader.dataset
+            if hasattr(dataset, 'feature_names'):
+                return dataset.feature_names
+            
+            # Try to get from dataloader's dataset's dataloader (if it's a HDF5DataLoader)
+            if hasattr(dataset, 'dataloader') and hasattr(dataset.dataloader, 'feature_names'):
+                return dataset.dataloader.feature_names
+            
+            # Try to get from trainer's dataloader
+            if hasattr(val_loader, 'feature_names'):
+                return val_loader.feature_names
+                
+        except Exception as e:
+            self.logger.warning(f"Could not get feature names: {e}")
+        
+        return None
+    
+    def _get_param_name(self, param_idx):
+        """Get parameter name for the given index."""
+        if self.feature_names and param_idx < len(self.feature_names):
+            # Clean up the feature name for display
+            name = self.feature_names[param_idx]
+            # Remove common prefixes and make it more readable
+            if name.startswith('model.'):
+                name = name[6:]  # Remove 'model.' prefix
+            if name.startswith('supernova.'):
+                name = name[10:]  # Remove 'supernova.' prefix
+            if name.startswith('mass_'):
+                name = name[5:]  # Remove 'mass_' prefix
+            # Replace underscores with spaces and capitalize
+            name = name.replace('_', ' ').title()
+            
+            # Truncate to 5-letter substrings if period or space delimited
+            if '.' in name or ' ' in name:
+                # Split by periods or spaces
+                parts = name.replace('.', ' ').split()
+                # Take first 5 letters of each part and concatenate
+                truncated_parts = [part[:5] for part in parts]
+                name = ''.join(truncated_parts)
+            
+            return name
+        else:
+            return f'Input {param_idx+1}'
     
     def _create_plot_grid(self):
         """Create the plot grid for pairwise analysis."""
@@ -632,22 +700,23 @@ class PairwiseInputAnalysisCallback(Callback):
             self.axes = np.array([[self.axes]])
         elif self.n_input_params == 2:
             self.axes = np.array(self.axes).reshape(2, 2)
-        
-        self.fig.suptitle('Pairwise Input Analysis: Loss Distribution', fontsize=16)
-        
+                
         # Set up all subplots
         for i in range(self.n_input_params):
             for j in range(self.n_input_params):
                 if i == j:
                     # Diagonal: 1D histogram of losses along this input dimension
-                    self.axes[i, j].set_title(f'Input {i+1} Loss Distribution')
-                    self.axes[i, j].set_xlabel(f'Input {i+1}')
+                    param_name = self._get_param_name(i)
+                    self.axes[i, j].set_title(f'{param_name} Loss Distribution')
+                    self.axes[i, j].set_xlabel(param_name)
                     self.axes[i, j].set_ylabel('Count')
                 elif i < j:
                     # Upper triangle: 2D histogram of average loss
-                    self.axes[i, j].set_title(f'Input {i+1} vs Input {j+1}')
-                    self.axes[i, j].set_xlabel(f'Input {i+1}')
-                    self.axes[i, j].set_ylabel(f'Input {j+1}')
+                    param_i_name = self._get_param_name(i)
+                    param_j_name = self._get_param_name(j)
+                    self.axes[i, j].set_title(f'{param_i_name} vs {param_j_name}')
+                    self.axes[i, j].set_xlabel(param_i_name)
+                    self.axes[i, j].set_ylabel(param_j_name)
                 else:
                     # Lower triangle: empty (or could be used for other plots)
                     self.axes[i, j].set_visible(False)
@@ -674,8 +743,11 @@ class PairwiseInputAnalysisCallback(Callback):
         
         losses = latest_losses.numpy()
         
+        # Calculate average loss for title
+        avg_loss = np.mean(losses)
+        
         # Update overall title first
-        self.fig.suptitle(f'Pairwise Input Analysis: Loss Distribution (Epoch {epoch})', fontsize=16)
+        self.fig.suptitle(f'Pairwise Input Analysis: Loss Distribution (Epoch {epoch}, Avg Loss: {avg_loss:.6f})', fontsize=16)
         
         # Update all subplots
         for i in range(self.n_input_params):
@@ -706,8 +778,9 @@ class PairwiseInputAnalysisCallback(Callback):
         bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
         ax.bar(bin_centers, avg_loss, width=bin_edges[1] - bin_edges[0], alpha=0.7, color='skyblue', edgecolor='black')
     
-        ax.set_title(f'Input {param_idx+1} Loss Distribution')
-        ax.set_xlabel(f'Input {param_idx+1}')
+        param_name = self._get_param_name(param_idx)
+        ax.set_title(f'{param_name} Loss Distribution')
+        ax.set_xlabel(param_name)
         ax.set_ylabel('Average Loss')
         ax.grid(True, alpha=0.3)
     
@@ -740,9 +813,11 @@ class PairwiseInputAnalysisCallback(Callback):
         cbar = plt.colorbar(im, ax=ax, label='Average Loss')
         self._colorbars[(param_i, param_j)] = cbar
         
-        ax.set_title(f'Input {param_i+1} vs Input {param_j+1}')
-        ax.set_xlabel(f'Input {param_i+1}')
-        ax.set_ylabel(f'Input {param_j+1}')
+        param_i_name = self._get_param_name(param_i)
+        param_j_name = self._get_param_name(param_j)
+        ax.set_title(f'{param_i_name} vs {param_j_name}')
+        ax.set_xlabel(param_i_name)
+        ax.set_ylabel(param_j_name)
         ax.grid(True, alpha=0.3)
     
     def _save_plots(self, epoch):
@@ -755,7 +830,7 @@ class PairwiseInputAnalysisCallback(Callback):
     
     def on_training_end(self, trainer) -> None:
         """Save final plots."""
-        if self.fig is not None:
+        if self.fig is not None and self.update_frequency is not None:
             final_plot_path = self.plot_dir / 'final_pairwise_analysis.png'
             self.fig.savefig(final_plot_path, dpi=150, bbox_inches='tight')
             self.logger.info(f"Saved final pairwise analysis plots to {final_plot_path}")
@@ -808,4 +883,4 @@ class CallbackManager:
         for callback in self.callbacks:
             if hasattr(callback, 'should_stop') and callback.should_stop:
                 return True
-        return False 
+        return False
