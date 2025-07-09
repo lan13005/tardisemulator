@@ -197,10 +197,15 @@ def main():
         
         # Setup directory manager
         logger.info(f"Setting up directory manager...")
-        directory_manager = DirectoryManager(args.output_dir, create_dirs=True)
         if args.experiment_name:
-            directory_manager = directory_manager.create_trial_directory(args.experiment_name)
+            # Create directory manager with experiment subdirectory, don't create base dir
+            experiment_path = Path(args.output_dir) / args.experiment_name
+            directory_manager = DirectoryManager(experiment_path, create_dirs=True)
             logger.info(f"Created experiment directory: {directory_manager.root_dir}")
+        else:
+            # Create directory manager in base directory
+            directory_manager = DirectoryManager(args.output_dir, create_dirs=True)
+            logger.info(f"Created base directory: {directory_manager.root_dir}")
         
         # Save preprocessor if used
         if preprocessor is not None:

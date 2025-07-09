@@ -474,6 +474,40 @@ class TrainingCurvesCallback(Callback):
             
             self.axes[0].legend()
             self.axes[0].set_xlim(0, max(max(epochs), 1) if epochs else epoch)
+            
+            # Set y-axis limits to focus attention on the minimum of both loss curves
+            # Collect all valid loss values
+            all_losses = []
+            if train_losses:
+                all_losses.extend([loss for loss in train_losses if loss is not None])
+            if val_losses:
+                all_losses.extend([loss for loss in val_losses if loss is not None])
+            
+            if all_losses:
+                min_loss = min(all_losses)
+                max_loss = max(all_losses)
+                
+                # Calculate y-axis limits: focus on the minimum with a reasonable range
+                # Use a factor to ensure the minimum is clearly visible and the range isn't too large
+                loss_range = max_loss - min_loss
+                if loss_range > 0:
+                    # Set ymin to slightly below the minimum, ymax to not much larger than minimum
+                    # Use a factor that scales with the loss range but caps the maximum
+                    ymin = min_loss * 0.95  # 5% below minimum
+                    ymax_factor = min(5, 1.0 + (loss_range / min_loss))  # Adaptive scaling
+                    ymax = min_loss * ymax_factor
+                    
+                    # Ensure we don't have negative ymin for positive losses
+                    if ymin < 0 and min_loss > 0:
+                        ymin = 0
+                    
+                    self.axes[0].set_ylim(ymin, ymax)
+                else:
+                    # If all losses are the same, set a small range around the value
+                    if min_loss > 0:
+                        self.axes[0].set_ylim(min_loss * 0.9, min_loss * 1.1)
+                    else:
+                        self.axes[0].set_ylim(-0.1, 0.1)
     
     def _update_validation_predictions(self, trainer, epoch):
         """Update validation predictions plot (individual sample subplots)."""
