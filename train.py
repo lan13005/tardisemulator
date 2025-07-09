@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.utils.config import ConfigManager
 from src.utils.logging import setup_logging
+from src.utils.directory import DirectoryManager
 from src.data.dataloader import HDF5DataLoader
 from src.data.preprocessing import DataPreprocessor
 from src.models.mlp import MLP
@@ -59,6 +60,20 @@ def parse_arguments():
         '--dry-run',
         action='store_true',
         help='Setup everything but do not start training'
+    )
+    
+    parser.add_argument(
+        '--output-dir',
+        type=str,
+        default='experiments',
+        help='Root directory for experiment outputs'
+    )
+    
+    parser.add_argument(
+        '--experiment-name',
+        type=str,
+        default=None,
+        help='Experiment name (optional, will create subdirectory)'
     )
     
     return parser.parse_args()
@@ -180,14 +195,17 @@ def main():
                    f"{data_info['input_dim']} input features, "
                    f"{data_info['output_dim']} output features")
         
+        # Setup directory manager
+        logger.info(f"Setting up directory manager...")
+        directory_manager = DirectoryManager(args.output_dir, create_dirs=True)
+        if args.experiment_name:
+            directory_manager = directory_manager.create_trial_directory(args.experiment_name)
+            logger.info(f"Created experiment directory: {directory_manager.root_dir}")
+        
         # Save preprocessor if used
         if preprocessor is not None:
-            preprocessor_path = os.path.join(
-                config.get('training.checkpointing.checkpoint_dir', 'checkpoints'),
-                'preprocessor.pkl'
-            )
-            os.makedirs(os.path.dirname(preprocessor_path), exist_ok=True)
-            data_loader.save_preprocessor(preprocessor_path)
+            preprocessor_path = directory_manager.checkpoints_dir / 'preprocessor.pkl'
+            data_loader.save_preprocessor(str(preprocessor_path))
         
         # Create model
         logger.info("Creating model...")
@@ -209,7 +227,7 @@ def main():
         
         # Create trainer with callback system
         logger.info("Setting up trainer with callback system...")
-        trainer = Trainer(model, trainer_config, device)
+        trainer = Trainer(model, trainer_config, device, directory_manager)
         
         # Log callback configuration
         training_config = config.get_training_config()
@@ -255,10 +273,11 @@ def main():
         # Log output directories
         logger.info("Training completed successfully!")
         logger.info("Check the following directories for outputs:")
-        logger.info(f"  - Training curves plots: {training_config.get('diagnostic_plotting_curves', {}).get('plot_dir', 'plots')}")
-        logger.info(f"  - Pairwise analysis plots: {training_config.get('diagnostic_plotting_pairplot', {}).get('plot_dir', 'plots')}")
-        logger.info(f"  - Logs: {training_config.get('logging', {}).get('log_dir', 'logs')}")
-        logger.info(f"  - Checkpoints: {training_config.get('checkpointing', {}).get('checkpoint_dir', 'checkpoints')}")
+        logger.info(f"  - Root directory: {directory_manager.root_dir}")
+        logger.info(f"  - Training curves plots: {directory_manager.plots_dir}")
+        logger.info(f"  - Pairwise analysis plots: {directory_manager.plots_dir}")
+        logger.info(f"  - Logs: {directory_manager.logs_dir}")
+        logger.info(f"  - Checkpoints: {directory_manager.checkpoints_dir}")
         
     except Exception as e:
         logger.error(f"Training failed with error: {str(e)}")

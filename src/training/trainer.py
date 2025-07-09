@@ -17,6 +17,7 @@ from .callbacks import (
     GradientClippingCallback, TrainingCurvesCallback, PairwiseInputAnalysisCallback
 )
 from ..models.base_model import BaseModel
+from ..utils.directory import DirectoryManager
 
 
 class Trainer:
@@ -26,7 +27,8 @@ class Trainer:
         self,
         model: BaseModel,
         config: Dict[str, Any],
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        directory_manager: Optional[DirectoryManager] = None
     ):
         """Initialize Trainer.
         
@@ -34,11 +36,15 @@ class Trainer:
             model: Model to train
             config: Training configuration
             device: Device to train on
+            directory_manager: Directory manager for organizing outputs
         """
         self.model = model
         self.config = config
         self.device = device if device else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.logger = logging.getLogger('pytorch_pipeline')
+        
+        # Initialize directory manager
+        self.directory_manager = directory_manager
         
         # Move model to device
         self.model.to(self.device)
@@ -49,6 +55,8 @@ class Trainer:
         self._initialize_callbacks()
         
         self.logger.info(f"Initialized trainer on device: {self.device}")
+        if self.directory_manager:
+            self.logger.info(f"Using directory manager: {self.directory_manager}")
     
     def _initialize_training_components(self) -> None:
         """Initialize training components from configuration."""
@@ -112,8 +120,12 @@ class Trainer:
         # Checkpoint callback
         checkpoint_config = training_config.get('checkpointing', {})
         if checkpoint_config.get('enabled', True):
+            checkpoint_dir = checkpoint_config.get('checkpoint_dir', 'checkpoints')
+            if self.directory_manager:
+                checkpoint_dir = str(self.directory_manager.checkpoints_dir)
+            
             checkpoint_callback = CheckpointCallback(
-                checkpoint_dir=checkpoint_config.get('checkpoint_dir', 'checkpoints'),
+                checkpoint_dir=checkpoint_dir,
                 max_checkpoints=checkpoint_config.get('max_checkpoints', 5),
                 monitor=checkpoint_config.get('monitor', 'val_loss'),
                 mode=checkpoint_config.get('mode', 'min'),
@@ -124,8 +136,12 @@ class Trainer:
         # Logging callback
         log_config = training_config.get('logging', {})
         if log_config.get('enabled', True):
+            log_dir = log_config.get('log_dir', 'logs')
+            if self.directory_manager:
+                log_dir = str(self.directory_manager.logs_dir)
+            
             logging_callback = LoggingCallback(
-                log_dir=log_config.get('log_dir', 'logs'),
+                log_dir=log_dir,
                 experiment_name=log_config.get('experiment_name', 'default'),
                 use_tensorboard=log_config.get('use_tensorboard', True),
                 log_every_n_batches=log_config.get('log_every_n_batches', 10)
@@ -155,8 +171,13 @@ class Trainer:
             update_frequency = curves_config.get('update_frequency', 1)
             if update_frequency is None:
                 update_frequency = None
+            
+            plot_dir = curves_config.get('plot_dir', 'plots')
+            if self.directory_manager:
+                plot_dir = str(self.directory_manager.plots_dir)
+            
             training_curves_callback = TrainingCurvesCallback(
-                plot_dir=curves_config.get('plot_dir', 'plots'),
+                plot_dir=plot_dir,
                 num_validation_samples=curves_config.get('num_validation_samples', 5),
                 update_frequency=update_frequency,
                 scaler=scaler,
@@ -176,8 +197,13 @@ class Trainer:
             update_frequency = pairplot_config.get('update_frequency', 10)
             if update_frequency is None:
                 update_frequency = None
+            
+            plot_dir = pairplot_config.get('plot_dir', 'plots')
+            if self.directory_manager:
+                plot_dir = str(self.directory_manager.plots_dir)
+            
             pairwise_analysis_callback = PairwiseInputAnalysisCallback(
-                plot_dir=pairplot_config.get('plot_dir', 'plots'),
+                plot_dir=plot_dir,
                 update_frequency=update_frequency,
                 num_bins=pairplot_config.get('num_bins', 20),
                 input_scaler=input_scaler
