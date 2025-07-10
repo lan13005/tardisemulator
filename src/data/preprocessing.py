@@ -11,13 +11,15 @@ import logging
 class DataPreprocessor:
     """Data preprocessing utilities for normalization and standardization."""
     
-    def __init__(self, method: str = 'standard'):
+    def __init__(self, method: str = 'standard', log_scaling: bool = False):
         """Initialize DataPreprocessor.
         
         Args:
             method: Preprocessing method ('standard', 'minmax', 'robust', 'none')
+            log_scaling: Whether to apply log10 scaling to columns with index >= 3
         """
         self.method = method
+        self.log_scaling = log_scaling
         self.input_scaler = None
         self.output_scaler = None
         self.is_fitted = False
@@ -38,6 +40,36 @@ class DataPreprocessor:
             self.output_scaler = None
         else:
             raise ValueError(f"Unknown preprocessing method: {method}")
+    
+    def _apply_log_scaling(self, data: np.ndarray) -> np.ndarray:
+        """Apply log10 scaling to columns with index >= 3.
+        
+        Args:
+            data: Input data array
+            
+        Returns:
+            Data with log scaling applied to appropriate columns
+        """
+        if not self.log_scaling or data.shape[1] <= 3:
+            return data
+        data_copy = data.copy()
+        data_copy[:, 3:] = np.log10(data_copy[:, 3:])
+        return data_copy
+    
+    def _inverse_log_scaling(self, data: np.ndarray) -> np.ndarray:
+        """Inverse log10 scaling for columns with index >= 3.
+        
+        Args:
+            data: Input data array with log scaling applied
+            
+        Returns:
+            Data with log scaling reversed
+        """
+        if not self.log_scaling or data.shape[1] <= 3:
+            return data
+        data_copy = data.copy()
+        data_copy[:, 3:] = np.power(10, data_copy[:, 3:])
+        return data_copy
     
     @property
     def scaler(self):
@@ -72,6 +104,11 @@ class DataPreprocessor:
         input_np = input_data.detach().cpu().numpy() if isinstance(input_data, torch.Tensor) else input_data
         output_np = output_data.detach().cpu().numpy() if isinstance(output_data, torch.Tensor) else output_data
         
+        # Apply log scaling to input data before fitting scaler
+        if self.log_scaling:
+            input_np = self._apply_log_scaling(input_np)
+            self.logger.info(f"Applied log scaling to input columns with index >= 3")
+        
         # Fit scalers
         if self.input_scaler is not None:
             self.input_scaler.fit(input_np)
@@ -102,12 +139,18 @@ class DataPreprocessor:
         if not self.is_fitted:
             raise ValueError("Preprocessor not fitted. Call fit() first.")
         
-        if self.input_scaler is None:
-            return input_data
-        
-        # Convert to numpy, transform, convert back
+        # Convert to numpy
         input_np = input_data.detach().cpu().numpy() if isinstance(input_data, torch.Tensor) else input_data
-        transformed_np = self.input_scaler.transform(input_np)
+        
+        # Apply log scaling first
+        if self.log_scaling:
+            input_np = self._apply_log_scaling(input_np)
+        
+        # Then apply main scaler
+        if self.input_scaler is not None:
+            transformed_np = self.input_scaler.transform(input_np)
+        else:
+            transformed_np = input_np
         
         if isinstance(input_data, torch.Tensor):
             return torch.tensor(transformed_np, dtype=input_data.dtype, device=input_data.device)
@@ -162,12 +205,18 @@ class DataPreprocessor:
         if not self.is_fitted:
             raise ValueError("Preprocessor not fitted. Call fit() first.")
         
-        if self.input_scaler is None:
-            return input_data
-        
-        # Convert to numpy, inverse transform, convert back
+        # Convert to numpy
         input_np = input_data.detach().cpu().numpy() if isinstance(input_data, torch.Tensor) else input_data
-        original_np = self.input_scaler.inverse_transform(input_np)
+        
+        # First inverse transform main scaler
+        if self.input_scaler is not None:
+            original_np = self.input_scaler.inverse_transform(input_np)
+        else:
+            original_np = input_np
+        
+        # Then inverse transform log scaling
+        if self.log_scaling:
+            original_np = self._inverse_log_scaling(original_np)
         
         if isinstance(input_data, torch.Tensor):
             return torch.tensor(original_np, dtype=input_data.dtype, device=input_data.device)
@@ -230,10 +279,11 @@ class DataPreprocessor:
             Dictionary with scaler information
         """
         if not self.is_fitted:
-            return {'method': self.method, 'fitted': False}
+            return {'method': self.method, 'log_scaling': self.log_scaling, 'fitted': False}
         
         info = {
             'method': self.method,
+            'log_scaling': self.log_scaling,
             'fitted': True
         }
         
@@ -274,6 +324,7 @@ class DataPreprocessor:
         
         scaler_data = {
             'method': self.method,
+            'log_scaling': self.log_scaling,
             'input_scaler': self.input_scaler,
             'output_scaler': self.output_scaler,
             'is_fitted': self.is_fitted
@@ -296,6 +347,7 @@ class DataPreprocessor:
             scaler_data = pickle.load(f)
         
         self.method = scaler_data['method']
+        self.log_scaling = scaler_data.get('log_scaling', False)  # Backward compatibility
         self.input_scaler = scaler_data['input_scaler']
         self.output_scaler = scaler_data['output_scaler']
         self.is_fitted = scaler_data['is_fitted']

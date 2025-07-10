@@ -15,12 +15,16 @@ data:
   
   # Data splitting
   limit_nsamples: null # load first limit_nsamples samples from hdf5 files, null to load all
-  train_split: 1.0
-  val_split: 0.0
+  train_split: 0.8
+  val_split: 0.2
   test_split: 0.0
   
+  # Log scaling for input columns (applies log10 to columns with index >= 3)
+  #   These correspond mostly to luminosity and mass fractions
+  log_scaling: true
+  
   # DataLoader settings
-  batch_size: 128
+  batch_size: 64
   shuffle: true
   num_workers: 0
   random_seed: 42
@@ -42,9 +46,9 @@ model:
   output_dim: null  # Will be determined automatically from data
   
   # MLP-specific configuration
-  hidden_dims: [2048]
+  hidden_dims: [128, 256, 512]
   activation: "relu"  # Options: relu, tanh, sigmoid, leaky_relu, gelu, swish
-  dropout_rate: 0.2
+  dropout_rate: 0.1
   use_batch_norm: true
   use_bias: true
 
@@ -143,7 +147,8 @@ training:
     enabled: true
     log_dir: "logs"
     experiment_name: "default_experiment"
-    use_tensorboard: true
+    use_mlflow: true
+    tracking_uri: "mlruns"  # MLflow tracking backend (local file system)
     log_every_n_batches: 10  # Log every N batches during training
     log_level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
   
@@ -160,7 +165,7 @@ training:
   diagnostic_plotting_pairplot:
     enabled: true
     plot_dir: "plots"
-    update_frequency: null  # Update plots every N epochs (less frequent due to compute cost), null = no plotting
+    update_frequency: 100  # Update plots every N epochs (less frequent due to compute cost), null = no plotting
     num_bins: 20  # Number of bins for X and Y axes in the histogram/contour plot
     input_scaler: null  # Scaler for inverse transforming inputs (if preprocessing was applied)
 
@@ -218,12 +223,6 @@ experiment:
   
   # Distributed training
   distributed: false
-
-# Scaler configuration (for inverse transformation in plotting)
-# This should be the same scaler used during data preprocessing
-scaler:
-  type: "standard"  # 'standard', 'minmax', 'robust'
-
 
 # -------------------------------------------------- 
 # Guidance for overfitting a single training sample

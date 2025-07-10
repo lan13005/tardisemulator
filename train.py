@@ -165,7 +165,16 @@ def main():
         preprocessor = None
         if preprocessing_config.get('method', 'standard') != 'none':
             logger.info("Setting up data preprocessing...")
-            preprocessor = DataPreprocessor(method=preprocessing_config['method'])
+            preprocessor = DataPreprocessor(
+                method=preprocessing_config['method'],
+                log_scaling=data_config.get('log_scaling', False)
+            )
+        
+        # Log log scaling configuration
+        if data_config.get('log_scaling', False):
+            logger.info("Log scaling enabled: will apply log10 to input columns with index >= 3")
+        else:
+            logger.info("Log scaling disabled")
         
         data_loader = HDF5DataLoader(
             input_file=data_config['input_file'],
@@ -175,7 +184,8 @@ def main():
             v0_kms=data_config.get('v0_kms', 5000),
             t0_day=data_config.get('t0_day', 5),
             keep_v_outer=data_config.get('keep_v_outer', True),
-            limit_nsamples=data_config.get('limit_nsamples', None)
+            limit_nsamples=data_config.get('limit_nsamples', None),
+            log_scaling=data_config.get('log_scaling', False)
         )
         
         # Create dataloaders

@@ -196,6 +196,7 @@ class HDF5DataLoader:
         t0_day: float = 5,
         keep_v_outer: bool = True,
         limit_nsamples: int = None,
+        log_scaling: bool = False,
     ):
         """Initialize HDF5DataLoader.
         
@@ -208,6 +209,7 @@ class HDF5DataLoader:
             t0_day: Reference time parameter
             keep_v_outer: Whether to keep outer velocity parameter
             limit_nsamples: Limit the number of samples to load
+            log_scaling: Whether to apply log10 scaling to columns with index >= 3
         """
         self.input_file = input_file
         self.output_file = output_file
@@ -217,7 +219,12 @@ class HDF5DataLoader:
         self.t0_day = t0_day
         self.keep_v_outer = keep_v_outer
         self.limit_nsamples = limit_nsamples
+        self.log_scaling = log_scaling
         self.logger = logging.getLogger('pytorch_pipeline')
+        
+        # If no preprocessor provided, create one with log_scaling
+        if self.preprocessor is None and log_scaling:
+            self.preprocessor = DataPreprocessor(method='standard', log_scaling=log_scaling)
         
         # Data storage
         self.input_data = None

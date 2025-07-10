@@ -10,6 +10,7 @@ logs/
 plots/
 inputs/
 tasks/
+mlruns/
 
 # Virtual environments
 .venv
