@@ -28,7 +28,8 @@ class Trainer:
         model: BaseModel,
         config: Dict[str, Any],
         device: Optional[torch.device] = None,
-        directory_manager: Optional[DirectoryManager] = None
+        directory_manager: Optional[DirectoryManager] = None,
+        scalers: Optional[Dict[str, Any]] = None
     ):
         """Initialize Trainer.
         
@@ -37,6 +38,7 @@ class Trainer:
             config: Training configuration
             device: Device to train on
             directory_manager: Directory manager for organizing outputs
+            scalers: Dictionary containing scalers for diagnostic plotting
         """
         self.model = model
         self.config = config
@@ -45,6 +47,9 @@ class Trainer:
         
         # Initialize directory manager
         self.directory_manager = directory_manager
+        
+        # Store scalers for diagnostic plotting
+        self.scalers = scalers or {}
         
         # Move model to device
         self.model.to(self.device)
@@ -140,11 +145,17 @@ class Trainer:
             if self.directory_manager:
                 log_dir = str(self.directory_manager.logs_dir)
             
+            # Get MLflow tracking URI - ensure it points to the centralized mlruns/ backend
+            tracking_uri = log_config.get('tracking_uri', 'mlruns')
+            if tracking_uri is None:
+                tracking_uri = 'mlruns'  # Default to local file system backend
+            
             logging_callback = LoggingCallback(
-                log_dir=log_dir,
                 experiment_name=log_config.get('experiment_name', 'default'),
-                use_tensorboard=log_config.get('use_tensorboard', True),
-                log_every_n_batches=log_config.get('log_every_n_batches', 10)
+                log_dir=log_dir,
+                use_mlflow=log_config.get('use_mlflow', True),
+                log_every_n_batches=log_config.get('log_every_n_batches', 10),
+                tracking_uri=tracking_uri
             )
             callbacks.append(logging_callback)
         
@@ -163,10 +174,8 @@ class Trainer:
         # Training curves callback
         curves_config = training_config.get('diagnostic_plotting_curves', {})
         if curves_config.get('enabled', True):
-            # Get scaler from config if available
-            scaler = None
-            if 'scaler' in self.config:
-                scaler = self.config['scaler']
+            # Get scaler from instance variable if available
+            scaler = self.scalers.get('scaler')
             
             update_frequency = curves_config.get('update_frequency', 1)
             if update_frequency is None:
@@ -189,10 +198,8 @@ class Trainer:
         # Pairwise input analysis callback
         pairplot_config = training_config.get('diagnostic_plotting_pairplot', {})
         if pairplot_config.get('enabled', True):
-            # Get input scaler from config if available
-            input_scaler = None
-            if 'input_scaler' in self.config:
-                input_scaler = self.config['input_scaler']
+            # Get input scaler from instance variable if available
+            input_scaler = self.scalers.get('input_scaler')
             
             update_frequency = pairplot_config.get('update_frequency', 10)
             if update_frequency is None:
@@ -212,6 +219,19 @@ class Trainer:
         
         # Initialize callback manager
         self.callback_manager = CallbackManager(callbacks)
+        
+        # Store reference to experiment logger for external access
+        self.experiment_logger = None
+        for callback in callbacks:
+            if isinstance(callback, LoggingCallback):
+                self.experiment_logger = callback.experiment_logger
+                break
+        
+        # Pass experiment logger to plotting callbacks
+        # TODO: this needs to be done better, hardcoded to TrainingCurvesCallback and PairwiseInputAnalysisCallback
+        for callback in callbacks:
+            if isinstance(callback, (TrainingCurvesCallback, PairwiseInputAnalysisCallback)):
+                callback.experiment_logger = self.experiment_logger
     
     def _create_loss_function(self, loss_config: Dict[str, Any]) -> nn.Module:
         """Create loss function from configuration.
@@ -408,6 +428,11 @@ class Trainer:
         # Callback: training end
         self.callback_manager.on_training_end(self)
         
+        # Close MLflow logger after all callbacks have completed
+        if self.experiment_logger:
+            self.experiment_logger.close()
+            self.logger.info("Closed MLflow logger")
+        
         return {
             'history': self.metrics_callback.train_history,
             'train_metrics_history': self.metrics_callback.train_metrics_history,
@@ -455,4 +480,18 @@ class Trainer:
             'total_epochs': len(self.metrics_callback.train_history['epoch']),
             'final_train_loss': self.metrics_callback.train_history['train_loss'][-1] if self.metrics_callback.train_history['train_loss'] else None,
             'final_val_loss': self.metrics_callback.train_history['val_loss'][-1] if self.metrics_callback.train_history['val_loss'] else None
-        } 
+        }
+    
+    def close(self) -> None:
+        """Close the trainer and all associated resources."""
+        if self.experiment_logger:
+            self.experiment_logger.close()
+            self.logger.info("Closed MLflow logger")
+    
+    def __del__(self):
+        """Destructor to ensure logger is closed."""
+        try:
+            if hasattr(self, 'experiment_logger') and self.experiment_logger:
+                self.experiment_logger.close()
+        except:
+            pass  # Ignore errors during cleanup 

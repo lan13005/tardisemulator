@@ -29,53 +29,51 @@ class MetricsCalculator:
     ) -> Dict[str, float]:
         """Calculate comprehensive regression metrics.
         
-        This is the primary function for TARDIS spectrum emulation tasks.
+        This function calculates metrics assuming data shape (samples, wavelengths).
+        For TARDIS emulation, each sample is a spectrum with multiple wavelength points.
         
         Args:
-            predictions: Model predictions (Y_pred)
-            targets: Ground truth targets (Y)
+            predictions: Model predictions (Y_pred) with shape (samples, wavelengths)
+            targets: Ground truth targets (Y) with shape (samples, wavelengths)
             
         Returns:
-            Dictionary of regression metrics
+            Dictionary of regression metrics:
+            - mse: Mean Squared Error averaged across all samples and wavelengths
+            - mae: Mean Absolute Error averaged across all samples and wavelengths  
+            - mae_mean_samples: Mean of MAE per sample (average over wavelengths, then mean over samples)
+            - mae_max_samples: Maximum of MAE per sample (average over wavelengths, then max over samples)
         """
         # Convert to numpy for calculations
         pred_np = predictions.detach().cpu().numpy()
         target_np = targets.detach().cpu().numpy()
         
-        # Mean Squared Error (Y-Y_pred)^2 - Primary metric for TARDIS emulation
+        # Validate shapes
+        if pred_np.shape != target_np.shape:
+            raise ValueError(f"Predictions and targets must have same shape. Got {pred_np.shape} vs {target_np.shape}")
+        
+        if len(pred_np.shape) != 2:
+            raise ValueError(f"Expected 2D arrays with shape (samples, wavelengths). Got shape {pred_np.shape}")
+        
+        # Mean Squared Error (Y-Y_pred)^2 - averaged across all samples and wavelengths
         mse = np.mean((target_np - pred_np) ** 2)
         
-        # Root Mean Squared Error
-        rmse = np.sqrt(mse)
-        
-        # Mean Absolute Error
+        # Mean Absolute Error - averaged across all samples and wavelengths
         mae = np.mean(np.abs(pred_np - target_np))
         
-        # Mean Absolute Percentage Error (handle division by zero)
-        with np.errstate(divide='ignore', invalid='ignore'):
-            mape = np.mean(np.abs((target_np - pred_np) / target_np)) * 100
-            mape = np.where(np.isfinite(mape), mape, 0)
+        # Calculate MAE per sample (average over wavelengths for each sample)
+        mae_per_sample = np.mean(np.abs(pred_np - target_np), axis=1)  # Shape: (samples,)
         
-        # R-squared (coefficient of determination)
-        ss_res = np.sum((target_np - pred_np) ** 2)
-        ss_tot = np.sum((target_np - np.mean(target_np)) ** 2)
-        r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+        # Mean of MAE per sample
+        mae_mean_samples = np.mean(mae_per_sample)
         
-        # Explained Variance Score
-        var_y = np.var(target_np)
-        explained_var = 1 - np.var(target_np - pred_np) / var_y if var_y != 0 else 0
-        
-        # Max Error
-        max_error = np.max(np.abs(pred_np - target_np))
+        # Maximum of MAE per sample  
+        mae_max_samples = np.max(mae_per_sample)
         
         return {
-            'mse': float(mse),                          # Primary metric: (Y-Y_pred)^2
-            'rmse': float(rmse),
-            'mae': float(mae),
-            'mape': float(np.mean(mape)),
-            'r2': float(r2),
-            'explained_variance': float(explained_var),
-            'max_error': float(max_error)
+            'mse': float(mse),                          # Global MSE across all samples and wavelengths
+            'mae': float(mae),                          # Global MAE across all samples and wavelengths
+            'mae_mean_samples': float(mae_mean_samples), # Mean of per-sample MAE (avg over wavelengths, then mean over samples)
+            'mae_max_samples': float(mae_max_samples)   # Max of per-sample MAE (avg over wavelengths, then max over samples)
         }
     
     def format_metrics(self, metrics: Dict[str, float], precision: int = 6) -> str:
@@ -100,7 +98,7 @@ class MetricsCalculator:
     def get_primary_metric(self, metrics: Dict[str, float]) -> float:
         """Get the primary metric for model evaluation.
         
-        For regression tasks, this is RMSE.
+        For regression tasks, this is MSE.
         
         Args:
             metrics: Dictionary of metrics
@@ -108,7 +106,7 @@ class MetricsCalculator:
         Returns:
             Primary metric value
         """
-        return metrics.get('rmse', float('inf'))
+        return metrics.get('mse', float('inf'))
     
     def is_better_metric(self, current: float, best: float) -> bool:
         """Check if current metric is better than best metric.
@@ -122,4 +120,4 @@ class MetricsCalculator:
         Returns:
             True if current is better than best
         """
-        return current < best 
+        return current < best

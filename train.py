@@ -198,14 +198,17 @@ def main():
         # Setup directory manager
         logger.info(f"Setting up directory manager...")
         if args.experiment_name:
-            # Create directory manager with experiment subdirectory, don't create base dir
-            experiment_path = Path(args.output_dir) / args.experiment_name
+            # Create directory manager with experiment subdirectory under experiments/
+            experiment_path = Path("experiments") / args.experiment_name
             directory_manager = DirectoryManager(experiment_path, create_dirs=True)
             logger.info(f"Created experiment directory: {directory_manager.root_dir}")
         else:
-            # Create directory manager in base directory
-            directory_manager = DirectoryManager(args.output_dir, create_dirs=True)
-            logger.info(f"Created base directory: {directory_manager.root_dir}")
+            # Create directory manager in experiments/ with timestamp
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            experiment_path = Path("experiments") / f"experiment_{timestamp}"
+            directory_manager = DirectoryManager(experiment_path, create_dirs=True)
+            logger.info(f"Created experiment directory: {directory_manager.root_dir}")
         
         # Save preprocessor if used
         if preprocessor is not None:
@@ -217,72 +220,78 @@ def main():
         model = create_model(config, data_info)
         model.print_model_summary()
         
-        # Prepare config for trainer with scaler for diagnostic plotting
+        # Prepare config for trainer
         trainer_config = config.config.copy()
-        
-        # Add scalers to config for diagnostic plotting callbacks
-        if preprocessor is not None and hasattr(preprocessor, 'scaler'):
-            trainer_config['scaler'] = preprocessor.scaler
-            # For pairwise analysis, we might need input scaler if inputs were preprocessed
-            if hasattr(preprocessor, 'input_scaler'):
-                trainer_config['input_scaler'] = preprocessor.input_scaler
-            logger.info("Added scalers to config for diagnostic plotting")
-        else:
-            logger.info("No scalers available for diagnostic plotting")
         
         # Create trainer with callback system
         logger.info("Setting up trainer with callback system...")
-        trainer = Trainer(model, trainer_config, device, directory_manager)
         
-        # Log callback configuration
-        training_config = config.get_training_config()
-        logger.info("Callback configuration:")
-        logger.info(f"  Early stopping: {training_config.get('early_stopping', {}).get('enabled', False)}")
-        logger.info(f"  Checkpointing: {training_config.get('checkpointing', {}).get('enabled', True)}")
-        logger.info(f"  Logging: {training_config.get('logging', {}).get('enabled', True)}")
-        logger.info(f"  Training curves plotting: {training_config.get('diagnostic_plotting_curves', {}).get('enabled', True)}")
-        logger.info(f"  Pairwise input analysis: {training_config.get('diagnostic_plotting_pairplot', {}).get('enabled', True)}")
-        logger.info(f"  Gradient clipping: {training_config.get('gradient_clipping') is not None}")
-        
-        if args.dry_run:
-            logger.info("Dry run complete. Exiting without training.")
-            return
-        
-        # Start training
-        epochs = training_config.get('epochs', 100)
-        
-        logger.info(f"Starting training for {epochs} epochs...")
-        
-        history = trainer.train(
-            train_loader=train_loader,
-            val_loader=val_loader,
-            epochs=epochs,
-            resume_from_checkpoint=args.resume
-        )
-        
-        # Evaluate on test set
-        if test_loader is not None and len(test_loader.dataset) > 0:
-            logger.info("Evaluating on test set...")
-            test_results = trainer.test(test_loader)
-            logger.info("Test evaluation completed")
+        # Pass scalers directly to trainer instead of adding to config
+        scalers = {}
+        if preprocessor is not None and hasattr(preprocessor, 'scaler'):
+            scalers['scaler'] = preprocessor.scaler
+            # For pairwise analysis, we might need input scaler if inputs were preprocessed
+            if hasattr(preprocessor, 'input_scaler'):
+                scalers['input_scaler'] = preprocessor.input_scaler
+            logger.info("Scalers available for diagnostic plotting")
         else:
-            logger.info("No test data available, skipping test evaluation")
+            logger.info("No scalers available for diagnostic plotting")
         
-        # Print training summary
-        summary = trainer.get_training_summary()
-        logger.info("Training Summary:")
-        logger.info(f"  Best validation score: {summary['best_val_score']:.6f}")
-        logger.info(f"  Best epoch: {summary['best_epoch']}")
-        logger.info(f"  Total epochs: {summary['total_epochs']}")
+        trainer = Trainer(model, trainer_config, device, directory_manager, scalers=scalers)
         
-        # Log output directories
-        logger.info("Training completed successfully!")
-        logger.info("Check the following directories for outputs:")
-        logger.info(f"  - Root directory: {directory_manager.root_dir}")
-        logger.info(f"  - Training curves plots: {directory_manager.plots_dir}")
-        logger.info(f"  - Pairwise analysis plots: {directory_manager.plots_dir}")
-        logger.info(f"  - Logs: {directory_manager.logs_dir}")
-        logger.info(f"  - Checkpoints: {directory_manager.checkpoints_dir}")
+        try:
+            # Log configuration and model to MLflow if available
+            if hasattr(trainer, 'experiment_logger'):
+                logger.info("Logging configuration and model to MLflow...")
+                trainer.experiment_logger.log_config(trainer_config, "training_config.yaml")
+                trainer.experiment_logger.log_model(model, "model")
+                logger.info(f"MLflow run ID: {trainer.experiment_logger.get_run_id()}")
+                logger.info(f"MLflow experiment: {trainer.experiment_logger.experiment_name}")
+            
+            # Log callback configuration
+            training_config = config.get_training_config()
+            logger.info("Callback configuration:")
+            logger.info(f"  Early stopping: {training_config.get('early_stopping', {}).get('enabled', False)}")
+            logger.info(f"  Checkpointing: {training_config.get('checkpointing', {}).get('enabled', True)}")
+            logger.info(f"  Logging: {training_config.get('logging', {}).get('enabled', True)}")
+            logger.info(f"  Training curves plotting: {training_config.get('diagnostic_plotting_curves', {}).get('enabled', True)}")
+            logger.info(f"  Pairwise input analysis: {training_config.get('diagnostic_plotting_pairplot', {}).get('enabled', True)}")
+            logger.info(f"  Gradient clipping: {training_config.get('gradient_clipping') is not None}")
+            
+            if args.dry_run:
+                logger.info("Dry run complete. Exiting without training.")
+                return
+            
+            # Start training
+            epochs = training_config.get('epochs', 100)
+            
+            logger.info(f"Starting training for {epochs} epochs...")
+            
+            history = trainer.train(
+                train_loader=train_loader,
+                val_loader=val_loader,
+                epochs=epochs,
+                resume_from_checkpoint=args.resume
+            )
+            
+            # Evaluate on test set
+            if test_loader is not None and len(test_loader.dataset) > 0:
+                logger.info("Evaluating on test set...")
+                test_results = trainer.test(test_loader)
+                logger.info("Test evaluation completed")
+            else:
+                logger.info("No test data available, skipping test evaluation")
+            
+            # Print training summary
+            summary = trainer.get_training_summary()
+            logger.info("Training Summary:")
+            logger.info(f"  Best validation score: {summary['best_val_score']:.6f}")
+            logger.info(f"  Best epoch: {summary['best_epoch']}")
+            logger.info(f"  Total epochs: {summary['total_epochs']}")
+            
+        finally:
+            # Ensure trainer is properly closed
+            trainer.close()
         
     except Exception as e:
         logger.error(f"Training failed with error: {str(e)}")

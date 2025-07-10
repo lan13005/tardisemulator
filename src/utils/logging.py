@@ -1,4 +1,4 @@
-"""Logging utilities and TensorBoard integration."""
+"""Logging utilities and MLflow integration."""
 
 import os
 import logging
@@ -6,12 +6,14 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
+import yaml
 
 try:
-    from torch.utils.tensorboard import SummaryWriter
-    TENSORBOARD_AVAILABLE = True
+    import mlflow
+    import mlflow.pytorch
+    MLFLOW_AVAILABLE = True
 except ImportError:
-    TENSORBOARD_AVAILABLE = False
+    MLFLOW_AVAILABLE = False
 
 
 def setup_logging(
@@ -68,134 +70,183 @@ def setup_logging(
     return logger
 
 
-class TensorBoardLogger:
-    """TensorBoard logging wrapper."""
+class MLflowLogger:
+    """MLflow logging wrapper."""
     
-    def __init__(self, log_dir: str, experiment_name: Optional[str] = None):
-        """Initialize TensorBoard logger.
+    def __init__(self, experiment_name: str, tracking_uri: Optional[str] = None):
+        """Initialize MLflow logger.
         
         Args:
-            log_dir: Directory for TensorBoard logs
             experiment_name: Name of the experiment
+            tracking_uri: MLflow tracking URI (optional, defaults to local file system)
         """
-        if not TENSORBOARD_AVAILABLE:
-            raise ImportError("TensorBoard not available. Install with: pip install tensorboard")
+        if not MLFLOW_AVAILABLE:
+            raise ImportError("MLflow not available. Install with: pip install mlflow")
         
-        self.log_dir = log_dir
         self.experiment_name = experiment_name
         
-        # Create experiment-specific log directory
-        if experiment_name:
-            tensorboard_dir = os.path.join(log_dir, "tensorboard", experiment_name)
+        # Set tracking URI - use "mlruns" as the backend for all experiments
+        # This ensures all MLflow data goes to the centralized mlruns/ directory
+        if tracking_uri:
+            mlflow.set_tracking_uri(tracking_uri)
         else:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            tensorboard_dir = os.path.join(log_dir, "tensorboard", f"experiment_{timestamp}")
+            # Default to local file system backend
+            mlflow.set_tracking_uri("mlruns")
         
-        os.makedirs(tensorboard_dir, exist_ok=True)
-        self.writer = SummaryWriter(log_dir=tensorboard_dir)
+        # Set experiment
+        mlflow.set_experiment(experiment_name)
         
-    def log_scalar(self, tag: str, value: float, step: int) -> None:
+        # Start run
+        self.run = mlflow.start_run()
+        self.logger = logging.getLogger('pytorch_pipeline')
+        self.logger.info(f"MLflow run started: {self.run.info.run_id}")
+        self.logger.info(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
+        self.logger.info(f"MLflow experiment: {experiment_name}")
+    
+    def log_scalar(self, key: str, value: float, step: int) -> None:
         """Log a scalar value.
         
         Args:
-            tag: Name of the scalar
+            key: Name of the scalar
             value: Value to log
             step: Step number (usually epoch or iteration)
         """
-        self.writer.add_scalar(tag, value, step)
+        mlflow.log_metric(key, value, step=step)
     
-    def log_scalars(self, tag: str, scalars: Dict[str, float], step: int) -> None:
+    def log_scalars(self, metrics: Dict[str, float], step: int) -> None:
         """Log multiple scalars.
         
         Args:
-            tag: Main tag name
-            scalars: Dictionary of {scalar_name: value}
+            metrics: Dictionary of {metric_name: value}
             step: Step number
         """
-        self.writer.add_scalars(tag, scalars, step)
+        for key, value in metrics.items():
+            mlflow.log_metric(key, value, step=step)
     
-    def log_histogram(self, tag: str, values, step: int) -> None:
+    def log_histogram(self, key: str, values, step: int) -> None:
         """Log histogram of values.
         
         Args:
-            tag: Name of the histogram
+            key: Name of the histogram
             values: Values to create histogram from
             step: Step number
         """
-        self.writer.add_histogram(tag, values, step)
+        # MLflow doesn't have direct histogram logging, but we can log as artifact
+        import numpy as np
+        import matplotlib.pyplot as plt
+        
+        fig, ax = plt.subplots()
+        ax.hist(values, bins=50, alpha=0.7)
+        ax.set_title(f'{key} (step {step})')
+        ax.set_xlabel('Value')
+        ax.set_ylabel('Frequency')
+        
+        # Save and log as artifact
+        hist_path = f"histograms/{key}_step_{step}.png"
+        os.makedirs(os.path.dirname(hist_path), exist_ok=True)
+        plt.savefig(hist_path)
+        mlflow.log_artifact(hist_path)
+        plt.close()
     
-    def log_image(self, tag: str, image, step: int) -> None:
+    def log_image(self, key: str, image_path: str, step: int) -> None:
         """Log an image.
         
         Args:
-            tag: Name of the image
-            image: Image tensor
+            key: Name of the image
+            image_path: Path to the image file
             step: Step number
         """
-        self.writer.add_image(tag, image, step)
+        mlflow.log_artifact(image_path, artifact_path=f"images/{key}_step_{step}")
     
-    def log_graph(self, model, input_to_model) -> None:
-        """Log model graph.
+    def log_model(self, model, artifact_path: str = "model") -> None:
+        """Log PyTorch model.
         
         Args:
             model: PyTorch model
-            input_to_model: Example input tensor
+            artifact_path: Path where to save the model
         """
-        self.writer.add_graph(model, input_to_model)
+        mlflow.pytorch.log_model(model, artifact_path)
     
-    def log_hyperparameters(self, hparam_dict: Dict[str, Any], metric_dict: Dict[str, float]) -> None:
-        """Log hyperparameters and metrics.
+    def log_hyperparameters(self, hparam_dict: Dict[str, Any]) -> None:
+        """Log hyperparameters.
         
         Args:
             hparam_dict: Dictionary of hyperparameters
-            metric_dict: Dictionary of metrics
         """
-        self.writer.add_hparams(hparam_dict, metric_dict)
+        mlflow.log_params(hparam_dict)
+    
+    def log_config(self, config: Dict[str, Any], config_name: str = "config.yaml") -> None:
+        """Log configuration file.
+        
+        Args:
+            config: Configuration dictionary
+            config_name: Name of the config file
+        """
+        # Save config as YAML file
+        config_path = f"configs/{config_name}"
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False, indent=2)
+        
+        mlflow.log_artifact(config_path)
+    
+    def log_artifact(self, local_path: str, artifact_path: Optional[str] = None) -> None:
+        """Log an artifact.
+        
+        Args:
+            local_path: Path to the local file/directory
+            artifact_path: Path within the artifact store
+        """
+        mlflow.log_artifact(local_path, artifact_path)
     
     def close(self) -> None:
-        """Close the TensorBoard writer."""
-        self.writer.close()
+        """End the MLflow run."""
+        mlflow.end_run()
     
-    def flush(self) -> None:
-        """Flush the TensorBoard writer."""
-        self.writer.flush()
+    def get_run_id(self) -> str:
+        """Get the current run ID."""
+        return self.run.info.run_id
 
 
 class ExperimentLogger:
-    """Combined logger for experiments with both file and TensorBoard logging."""
+    """Combined logger for experiments with both file and MLflow logging."""
     
     def __init__(
         self,
-        log_dir: str,
         experiment_name: str,
+        log_dir: Optional[str] = None,
         log_level: str = "INFO",
-        use_tensorboard: bool = True
+        use_mlflow: bool = True,
+        tracking_uri: Optional[str] = None
     ):
         """Initialize experiment logger.
         
         Args:
-            log_dir: Directory for all logs
             experiment_name: Name of the experiment
+            log_dir: Directory for file logs
             log_level: Logging level
-            use_tensorboard: Whether to use TensorBoard logging
+            use_mlflow: Whether to use MLflow logging
+            tracking_uri: MLflow tracking URI
         """
-        self.log_dir = log_dir
         self.experiment_name = experiment_name
-        self.use_tensorboard = use_tensorboard
+        self.use_mlflow = use_mlflow
         
         # Setup standard logging
         self.logger = setup_logging(log_level, log_dir, experiment_name)
         
-        # Setup TensorBoard logging
-        self.tb_logger = None
-        if use_tensorboard and TENSORBOARD_AVAILABLE:
+        # Setup MLflow logging
+        self.mlflow_logger = None
+        if use_mlflow and MLFLOW_AVAILABLE:
             try:
-                self.tb_logger = TensorBoardLogger(log_dir, experiment_name)
-                self.logger.info("TensorBoard logging enabled")
+                self.mlflow_logger = MLflowLogger(experiment_name, tracking_uri)
+                self.logger.info("MLflow logging enabled")
+                self.logger.info(f"MLflow tracking backend: {tracking_uri or 'mlruns'}")
+                self.logger.info(f"Local experiment outputs: {log_dir}")
             except Exception as e:
-                self.logger.warning(f"Failed to initialize TensorBoard logging: {e}")
-        elif use_tensorboard and not TENSORBOARD_AVAILABLE:
-            self.logger.warning("TensorBoard requested but not available")
+                self.logger.warning(f"Failed to initialize MLflow logging: {e}")
+        elif use_mlflow and not MLFLOW_AVAILABLE:
+            self.logger.warning("MLflow requested but not available")
     
     def log_training_step(
         self,
@@ -218,12 +269,12 @@ class ExperimentLogger:
             metric_str = ", ".join([f"{k}={v:.6f}" for k, v in metrics.items()])
             self.logger.info(f"Epoch {epoch}, Step {step}: {metric_str}")
         
-        # Log to TensorBoard
-        if self.tb_logger:
-            self.tb_logger.log_scalar("Training/Loss", loss, step)
+        # Log to MLflow
+        if self.mlflow_logger:
+            self.mlflow_logger.log_scalar("Training/Loss", loss, step)
             if metrics:
                 for name, value in metrics.items():
-                    self.tb_logger.log_scalar(f"Training/{name}", value, step)
+                    self.mlflow_logger.log_scalar(f"Training/{name}", value, step)
     
     def log_validation_results(
         self,
@@ -244,14 +295,50 @@ class ExperimentLogger:
             metric_str = ", ".join([f"{k}={v:.6f}" for k, v in val_metrics.items()])
             self.logger.info(f"Epoch {epoch} Validation: {metric_str}")
         
-        # Log to TensorBoard
-        if self.tb_logger:
-            self.tb_logger.log_scalar("Validation/Loss", val_loss, epoch)
+        # Log to MLflow
+        if self.mlflow_logger:
+            self.mlflow_logger.log_scalar("Validation/Loss", val_loss, epoch)
             if val_metrics:
                 for name, value in val_metrics.items():
-                    self.tb_logger.log_scalar(f"Validation/{name}", value, epoch)
+                    self.mlflow_logger.log_scalar(f"Validation/{name}", value, epoch)
+    
+    def log_model(self, model, artifact_path: str = "model") -> None:
+        """Log PyTorch model.
+        
+        Args:
+            model: PyTorch model
+            artifact_path: Path where to save the model
+        """
+        if self.mlflow_logger:
+            self.mlflow_logger.log_model(model, artifact_path)
+    
+    def log_config(self, config: Dict[str, Any], config_name: str = "config.yaml") -> None:
+        """Log configuration file.
+        
+        Args:
+            config: Configuration dictionary
+            config_name: Name of the config file
+        """
+        if self.mlflow_logger:
+            self.mlflow_logger.log_config(config, config_name)
+    
+    def log_artifact(self, local_path: str, artifact_path: Optional[str] = None) -> None:
+        """Log an artifact.
+        
+        Args:
+            local_path: Path to the local file/directory
+            artifact_path: Path within the artifact store
+        """
+        if self.mlflow_logger:
+            self.mlflow_logger.log_artifact(local_path, artifact_path)
+    
+    def get_run_id(self) -> Optional[str]:
+        """Get the current MLflow run ID."""
+        if self.mlflow_logger:
+            return self.mlflow_logger.get_run_id()
+        return None
     
     def close(self) -> None:
         """Close all loggers."""
-        if self.tb_logger:
-            self.tb_logger.close() 
+        if self.mlflow_logger:
+            self.mlflow_logger.close() 

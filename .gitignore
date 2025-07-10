@@ -8,6 +8,8 @@ wheels/
 checkpoints/
 logs/
 plots/
+inputs/
+tasks/
 
 # Virtual environments
 .venv

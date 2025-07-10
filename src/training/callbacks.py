@@ -22,6 +22,8 @@ class Callback(ABC):
     
     def on_training_start(self, trainer) -> None:
         """Called at the start of training."""
+        # Store reference to trainer for callbacks that need it
+        self.trainer = trainer
         pass
     
     def on_epoch_start(self, trainer, epoch: int) -> None:
@@ -174,26 +176,36 @@ class CheckpointCallback(Callback):
 
 
 class LoggingCallback(Callback):
-    """Logging callback for training metrics and TensorBoard logging."""
+    """Logging callback for training metrics and MLflow logging."""
     
     def __init__(
         self,
-        log_dir: str = 'logs',
         experiment_name: str = 'default',
-        use_tensorboard: bool = True,
-        log_every_n_batches: int = 10
+        log_dir: str = 'logs',
+        use_mlflow: bool = True,
+        log_every_n_batches: int = 10,
+        tracking_uri: Optional[str] = None
     ):
         """Initialize LoggingCallback.
         
         Args:
-            log_dir: Directory for logs
             experiment_name: Name of the experiment
-            use_tensorboard: Whether to use TensorBoard logging
+            log_dir: Directory for logs
+            use_mlflow: Whether to use MLflow logging
             log_every_n_batches: Log every N batches
+            tracking_uri: MLflow tracking URI
         """
-        self.experiment_logger = ExperimentLogger(log_dir, experiment_name, use_tensorboard=use_tensorboard)
+        self.experiment_logger = ExperimentLogger(experiment_name, log_dir, use_mlflow=use_mlflow, tracking_uri=tracking_uri)
         self.log_every_n_batches = log_every_n_batches
         self.logger = logging.getLogger('pytorch_pipeline')
+        
+        # Log MLflow setup information
+        if use_mlflow and hasattr(self.experiment_logger, 'mlflow_logger') and self.experiment_logger.mlflow_logger:
+            self.logger.info(f"MLflow logging enabled for experiment: {experiment_name}")
+            self.logger.info(f"MLflow tracking URI: {tracking_uri or 'mlruns'}")
+            self.logger.info(f"Local experiment outputs: {log_dir}")
+        else:
+            self.logger.info(f"MLflow logging disabled, using local logging only: {log_dir}")
     
     def on_batch_end(self, trainer, batch_idx: int, batch: Tuple, loss: float, outputs: torch.Tensor) -> None:
         """Log batch-level metrics."""
@@ -213,21 +225,24 @@ class LoggingCallback(Callback):
         
         # Log primary metrics
         if train_metrics:
-            primary_train = train_metrics.get('rmse', train_metrics.get('loss', 0))
-            log_msg = f"Epoch {epoch:4d}: Train RMSE = {primary_train:.6f}"
+            primary_train = train_metrics.get('mse', train_metrics.get('loss', 0))
+            log_msg = f"Epoch {epoch:4d}: Train MSE = {primary_train:.6f}"
             if val_metrics:
-                primary_val = val_metrics.get('rmse', val_metrics.get('loss', 0))
-                log_msg += f", Val RMSE = {primary_val:.6f}"
+                primary_val = val_metrics.get('mse', val_metrics.get('loss', 0))
+                log_msg += f", Val MSE = {primary_val:.6f}"
             self.logger.info(log_msg)
         
-        # TensorBoard logging
-        self.experiment_logger.log_training_step(epoch, trainer.global_step, train_metrics.get('loss', 0), train_metrics)
+        # MLflow logging
+        _train_metrics = {k: v for k, v in train_metrics.items() if k not in ['loss', 'mse']}
+        _val_metrics = {k: v for k, v in val_metrics.items() if k not in ['loss', 'mse']}
+        self.experiment_logger.log_training_step(epoch, trainer.global_step, train_metrics.get('loss', 0), _train_metrics)
         if val_metrics:
-            self.experiment_logger.log_validation_results(epoch, val_metrics.get('loss', 0), val_metrics)
+            self.experiment_logger.log_validation_results(epoch, val_metrics.get('loss', 0), _val_metrics)
     
     def on_training_end(self, trainer) -> None:
-        """Close logging."""
-        self.experiment_logger.close()
+        """Called at the end of training."""
+        # Note: MLflow logger is now closed in the trainer after all callbacks complete
+        pass
 
 
 class SchedulerCallback(Callback):
@@ -325,7 +340,8 @@ class TrainingCurvesCallback(Callback):
         update_frequency: int = 1,
         scaler=None,
         wavelength_range: Optional[Tuple[float, float]] = None,
-        seed: int = 42
+        seed: int = 42,
+        experiment_logger=None
     ):
         """Initialize TrainingCurvesCallback.
         
@@ -336,6 +352,7 @@ class TrainingCurvesCallback(Callback):
             scaler: Scaler for inverse transforming predictions
             wavelength_range: Range of wavelengths for plotting (min, max)
             seed: Random seed for selecting validation samples to track
+            experiment_logger: Experiment logger for MLflow artifact logging
         """
         self.plot_dir = Path(plot_dir)
         self.plot_dir.mkdir(exist_ok=True)
@@ -344,6 +361,7 @@ class TrainingCurvesCallback(Callback):
         self.scaler = scaler
         self.wavelength_range = wavelength_range
         self.seed = seed
+        self.experiment_logger = experiment_logger
         
         self.logger = logging.getLogger('pytorch_pipeline')
         
@@ -558,10 +576,18 @@ class TrainingCurvesCallback(Callback):
             self.axes[i + 1].legend()
     
     def _save_plots(self, epoch):
-        """Save plots to file."""
+        """Save plots to file and log to MLflow."""
         plot_path = self.plot_dir / f'training_diagnostics_epoch_{epoch:04d}.png'
         self.fig.savefig(plot_path, dpi=150, bbox_inches='tight')
         self.logger.info(f"Saved diagnostic plots to {plot_path}")
+        
+        # Log to MLflow if available
+        if self.experiment_logger:
+            self.experiment_logger.log_artifact(
+                str(plot_path), 
+                artifact_path=f"training_curves"
+            )
+            self.logger.info(f"Logged diagnostic plots to MLflow as training_curves/epoch_{epoch:04d}.png")
     
     def on_training_end(self, trainer) -> None:
         """Save final plots."""
@@ -569,6 +595,15 @@ class TrainingCurvesCallback(Callback):
             final_plot_path = self.plot_dir / 'final_training_diagnostics.png'
             self.fig.savefig(final_plot_path, dpi=150, bbox_inches='tight')
             self.logger.info(f"Saved final diagnostic plots to {final_plot_path}")
+            
+            # Log to MLflow if available
+            if self.experiment_logger:
+                self.experiment_logger.log_artifact(
+                    str(final_plot_path), 
+                    artifact_path="training_curves"
+                )
+                self.logger.info("Logged final diagnostic plots to MLflow as training_curves/final_training_diagnostics.png")
+            
             plt.close(self.fig)
 
 
@@ -580,7 +615,8 @@ class PairwiseInputAnalysisCallback(Callback):
         plot_dir: str = 'plots',
         update_frequency: int = 10,
         num_bins: int = 20,
-        input_scaler=None
+        input_scaler=None,
+        experiment_logger=None
     ):
         """Initialize PairwiseInputAnalysisCallback.
         
@@ -589,12 +625,14 @@ class PairwiseInputAnalysisCallback(Callback):
             update_frequency: Update plots every N epochs (less frequent due to compute cost)
             num_bins: Number of bins for X and Y axes in the histogram/contour plot
             input_scaler: Scaler for inverse transforming inputs (if preprocessing was applied)
+            experiment_logger: Experiment logger for MLflow artifact logging
         """
         self.plot_dir = Path(plot_dir)
         self.plot_dir.mkdir(exist_ok=True)
         self.update_frequency = update_frequency
         self.num_bins = num_bins
         self.input_scaler = input_scaler
+        self.experiment_logger = experiment_logger
         self._colorbars = {}
         
         self.logger = logging.getLogger('pytorch_pipeline')
@@ -780,9 +818,6 @@ class PairwiseInputAnalysisCallback(Callback):
         # Calculate average loss for title
         avg_loss = np.mean(losses)
         
-        # Update overall title first
-        self.fig.suptitle(f'Pairwise Input Analysis: Loss Distribution (Epoch {epoch}, Avg Loss: {avg_loss:.6f})', fontsize=16)
-        
         # Update all subplots
         for i in range(self.n_input_params):
             for j in range(self.n_input_params):
@@ -855,12 +890,20 @@ class PairwiseInputAnalysisCallback(Callback):
         ax.grid(True, alpha=0.3)
     
     def _save_plots(self, epoch):
-        """Save plots to file."""
+        """Save plots to file and log to MLflow."""
         if self.fig is None:
             return
         plot_path = self.plot_dir / f'pairwise_analysis_epoch_{epoch:04d}.png'
         self.fig.savefig(plot_path, dpi=150, bbox_inches='tight')
         self.logger.info(f"Saved pairwise analysis plots to {plot_path}")
+        
+        # Log to MLflow if available
+        if self.experiment_logger:
+            self.experiment_logger.log_artifact(
+                str(plot_path), 
+                artifact_path=f"pairwise_analysis"
+            )
+            self.logger.info(f"Logged pairwise analysis plots to MLflow as pairwise_analysis/epoch_{epoch:04d}.png")
     
     def on_training_end(self, trainer) -> None:
         """Save final plots."""
@@ -868,6 +911,15 @@ class PairwiseInputAnalysisCallback(Callback):
             final_plot_path = self.plot_dir / 'final_pairwise_analysis.png'
             self.fig.savefig(final_plot_path, dpi=150, bbox_inches='tight')
             self.logger.info(f"Saved final pairwise analysis plots to {final_plot_path}")
+            
+            # Log to MLflow if available
+            if self.experiment_logger:
+                self.experiment_logger.log_artifact(
+                    str(final_plot_path), 
+                    artifact_path="pairwise_analysis"
+                )
+                self.logger.info("Logged final pairwise analysis plots to MLflow as pairwise_analysis/final_pairwise_analysis.png")
+            
             plt.close(self.fig)
 
 

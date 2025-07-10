@@ -15,7 +15,7 @@ class DirectoryManager:
     Attributes:
         root_dir (Path): Root directory for all experiment outputs
         checkpoints_dir (Path): Directory for model checkpoints
-        logs_dir (Path): Directory for log files and TensorBoard logs
+        logs_dir (Path): Directory for log files and MLflow logs
         plots_dir (Path): Directory for diagnostic plots
     """
     
