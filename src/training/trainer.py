@@ -88,9 +88,9 @@ class Trainer:
             )
         
         # Metrics calculator (regression only)
-        # Get scaler from instance variable if available
-        scaler = self.scalers.get('scaler') if self.scalers else None
-        self.metrics_calculator = MetricsCalculator('regression', scaler=scaler)
+        # Get preprocessor from instance variable if available
+        preprocessor = self.scalers.get('preprocessor') if self.scalers else None
+        self.metrics_calculator = MetricsCalculator('regression', preprocessor=preprocessor)
         
         # Gradient clipping
         self.grad_clip_value = training_config.get('gradient_clipping', None)
@@ -99,8 +99,19 @@ class Trainer:
         """Initialize training tracking variables."""
         self.current_epoch = 0
         self.global_step = 0
-        self.best_val_score = float('inf')
         self.best_epoch = 0
+        
+        # Get monitor metric and mode from config (default to 'loss' and 'min')
+        training_config = self.config.get('training', {})
+        early_stopping_config = training_config.get('early_stopping', {})
+        self.monitor_metric = early_stopping_config.get('monitor', 'loss')
+        self.monitor_mode = early_stopping_config.get('mode', 'min')
+        
+        # Initialize best_val_score based on mode
+        if self.monitor_mode == 'min':
+            self.best_val_score = float('inf')
+        else:
+            self.best_val_score = float('-inf')
     
     def _initialize_callbacks(self) -> None:
         """Initialize callbacks from configuration."""
@@ -176,8 +187,8 @@ class Trainer:
         # Training curves callback
         curves_config = training_config.get('diagnostic_plotting_curves', {})
         if curves_config.get('enabled', True):
-            # Get scaler from instance variable if available
-            scaler = self.scalers.get('scaler')
+            # Get preprocessor from instance variable if available
+            preprocessor = self.scalers.get('preprocessor')
             
             update_frequency = curves_config.get('update_frequency', 1)
             if update_frequency is None:
@@ -191,7 +202,7 @@ class Trainer:
                 plot_dir=plot_dir,
                 num_validation_samples=curves_config.get('num_validation_samples', 5),
                 update_frequency=update_frequency,
-                scaler=scaler,
+                preprocessor=preprocessor,
                 wavelength_range=curves_config.get('wavelength_range', None),
                 seed=curves_config.get('seed', 42)
             )
@@ -200,8 +211,8 @@ class Trainer:
         # Pairwise input analysis callback
         pairplot_config = training_config.get('diagnostic_plotting_pairplot', {})
         if pairplot_config.get('enabled', True):
-            # Get input scaler from instance variable if available
-            input_scaler = self.scalers.get('input_scaler')
+            # Get preprocessor from instance variable if available
+            preprocessor = self.scalers.get('preprocessor')
             
             update_frequency = pairplot_config.get('update_frequency', 10)
             if update_frequency is None:
@@ -215,7 +226,7 @@ class Trainer:
                 plot_dir=plot_dir,
                 update_frequency=update_frequency,
                 num_bins=pairplot_config.get('num_bins', 20),
-                input_scaler=input_scaler
+                preprocessor=preprocessor
             )
             callbacks.append(pairwise_analysis_callback)
         
@@ -387,6 +398,21 @@ class Trainer:
                         resume_from_checkpoint, self.model, self.optimizer, self.scheduler, self.device
                     )
                     start_epoch = checkpoint_info['epoch'] + 1
+                    
+                    # Restore best validation score from checkpoint if available
+                    checkpoint_metrics = checkpoint_info.get('metrics', {})
+                    
+                    # Try to restore from additional state first (more reliable)
+                    if 'best_val_score' in checkpoint_info and checkpoint_info['best_val_score'] is not None:
+                        self.best_val_score = checkpoint_info['best_val_score']
+                        self.best_epoch = checkpoint_info.get('best_epoch', checkpoint_info['epoch'])
+                        self.logger.info(f"Restored best validation {self.monitor_metric}: {self.best_val_score:.6f} from epoch {self.best_epoch}")
+                    # Fallback to using current epoch's metric if additional state not available
+                    elif self.monitor_metric in checkpoint_metrics:
+                        self.best_val_score = checkpoint_metrics[self.monitor_metric]
+                        self.best_epoch = checkpoint_info['epoch']
+                        self.logger.info(f"Restored best validation {self.monitor_metric}: {self.best_val_score:.6f} from epoch {self.best_epoch}")
+                    
                     self.logger.info(f"Resumed training from epoch {start_epoch}")
                     break
         
@@ -418,6 +444,21 @@ class Trainer:
             
             # Callback: epoch end
             self.callback_manager.on_epoch_end(self, epoch, train_metrics, val_metrics)
+            
+            # Update best validation score if validation metrics are available
+            if val_metrics and self.monitor_metric in val_metrics:
+                current_val_score = val_metrics[self.monitor_metric]
+                is_better = False
+                
+                if self.monitor_mode == 'min':
+                    is_better = current_val_score < self.best_val_score
+                else:  # mode == 'max'
+                    is_better = current_val_score > self.best_val_score
+                
+                if is_better:
+                    self.best_val_score = current_val_score
+                    self.best_epoch = epoch
+                    self.logger.info(f"New best validation {self.monitor_metric}: {self.best_val_score:.6f} at epoch {epoch}")
             
             # Check if training should stop
             if self.callback_manager.should_stop_training():

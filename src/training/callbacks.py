@@ -153,6 +153,11 @@ class CheckpointCallback(Callback):
     def on_epoch_end(self, trainer, epoch: int, train_metrics: Dict[str, float], val_metrics: Optional[Dict[str, float]]) -> None:
         """Save checkpoint if conditions are met."""
         if val_metrics is None or self.monitor not in val_metrics:
+            self.logger.warning(f"No validation metrics found for monitor {self.monitor}")
+            if val_metrics is not None:
+                self.logger.warning(f"Available metrics: {val_metrics.keys()}")
+            else:
+                self.logger.warning("No validation metrics available")
             return
         
         current_score = val_metrics[self.monitor]
@@ -169,9 +174,18 @@ class CheckpointCallback(Callback):
         # Save checkpoint
         if not self.save_best_only or is_best:
             checkpoint_metrics = val_metrics if val_metrics else train_metrics
+            
+            # Save trainer's best validation score as additional state
+            additional_state = {
+                'best_val_score': getattr(trainer, 'best_val_score', None),
+                'best_epoch': getattr(trainer, 'best_epoch', None),
+                'monitor_metric': getattr(trainer, 'monitor_metric', 'loss'),
+                'monitor_mode': getattr(trainer, 'monitor_mode', 'min')
+            }
+            
             checkpoint_path = self.checkpoint_manager.save_checkpoint(
                 trainer.model, trainer.optimizer, trainer.scheduler, 
-                epoch, checkpoint_metrics, is_best
+                epoch, checkpoint_metrics, is_best, additional_state
             )
             self.logger.info(f"Saved checkpoint to {checkpoint_path}")
 
@@ -339,7 +353,7 @@ class TrainingCurvesCallback(Callback):
         plot_dir: str = 'plots',
         num_validation_samples: int = 5,
         update_frequency: int = 1,
-        scaler=None,
+        preprocessor=None,
         wavelength_range: Optional[Tuple[float, float]] = None,
         seed: int = 42,
         experiment_logger=None
@@ -350,7 +364,7 @@ class TrainingCurvesCallback(Callback):
             plot_dir: Directory to save plots
             num_validation_samples: Number of validation samples to plot
             update_frequency: Update plots every N epochs
-            scaler: Scaler for inverse transforming predictions
+            preprocessor: DataPreprocessor for inverse transforming predictions
             wavelength_range: Range of wavelengths for plotting (min, max)
             seed: Random seed for selecting validation samples to track
             experiment_logger: Experiment logger for MLflow artifact logging
@@ -359,7 +373,7 @@ class TrainingCurvesCallback(Callback):
         self.plot_dir.mkdir(exist_ok=True)
         self.num_validation_samples = num_validation_samples
         self.update_frequency = update_frequency
-        self.scaler = scaler
+        self.preprocessor = preprocessor
         self.wavelength_range = wavelength_range
         self.seed = seed
         self.experiment_logger = experiment_logger
@@ -549,10 +563,13 @@ class TrainingCurvesCallback(Callback):
             self.axes[i + 1].set_ylabel('Flux')
             self.axes[i + 1].grid(True, alpha=0.3)
             
-            # Inverse transform if scaler is available
-            if self.scaler is not None:
-                target_original = self.scaler.inverse_transform(self.val_targets[i].numpy().reshape(1, -1)).flatten()
-                pred_original = self.scaler.inverse_transform(latest_predictions[i].numpy().reshape(1, -1)).flatten()
+            # Use DataPreprocessor to inverse transform if available
+            if self.preprocessor is not None:
+                target_tensor = self.val_targets[i].unsqueeze(0)  # Add batch dimension
+                pred_tensor = latest_predictions[i].unsqueeze(0)  # Add batch dimension
+                
+                target_original = self.preprocessor.inverse_transform_output(target_tensor).squeeze(0).numpy()
+                pred_original = self.preprocessor.inverse_transform_output(pred_tensor).squeeze(0).numpy()
             else:
                 target_original = self.val_targets[i].numpy()
                 pred_original = latest_predictions[i].numpy()
@@ -616,7 +633,7 @@ class PairwiseInputAnalysisCallback(Callback):
         plot_dir: str = 'plots',
         update_frequency: int = 10,
         num_bins: int = 20,
-        input_scaler=None,
+        preprocessor=None,
         experiment_logger=None
     ):
         """Initialize PairwiseInputAnalysisCallback.
@@ -625,14 +642,14 @@ class PairwiseInputAnalysisCallback(Callback):
             plot_dir: Directory to save plots
             update_frequency: Update plots every N epochs (less frequent due to compute cost)
             num_bins: Number of bins for X and Y axes in the histogram/contour plot
-            input_scaler: Scaler for inverse transforming inputs (if preprocessing was applied)
+            preprocessor: DataPreprocessor for inverse transforming inputs (if preprocessing was applied)
             experiment_logger: Experiment logger for MLflow artifact logging
         """
         self.plot_dir = Path(plot_dir)
         self.plot_dir.mkdir(exist_ok=True)
         self.update_frequency = update_frequency
         self.num_bins = num_bins
-        self.input_scaler = input_scaler
+        self.preprocessor = preprocessor
         self.experiment_logger = experiment_logger
         self._colorbars = {}
         
@@ -808,9 +825,9 @@ class PairwiseInputAnalysisCallback(Callback):
             # Calculate per-sample losses (MSE for each sample)
             latest_losses = torch.mean((latest_predictions - self.val_targets) ** 2, dim=1)
         
-        # Inverse transform inputs if scaler is available
-        if self.input_scaler is not None:
-            inputs_original = self.input_scaler.inverse_transform(self.val_inputs.numpy())
+        # Use DataPreprocessor to inverse transform inputs if available
+        if self.preprocessor is not None:
+            inputs_original = self.preprocessor.inverse_transform_input(self.val_inputs).numpy()
         else:
             inputs_original = self.val_inputs.numpy()
         

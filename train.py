@@ -167,14 +167,20 @@ def main():
             logger.info("Setting up data preprocessing...")
             preprocessor = DataPreprocessor(
                 method=preprocessing_config['method'],
-                log_scaling=data_config.get('log_scaling', False)
+                log_scaling=data_config.get('log_scaling', False),
+                output_log_scaling=data_config.get('output_log_scaling', False)
             )
         
         # Log log scaling configuration
         if data_config.get('log_scaling', False):
-            logger.info("Log scaling enabled: will apply log10 to input columns with index >= 3")
+            logger.info("Input log scaling enabled: will apply log10 to input columns with index >= 3")
         else:
-            logger.info("Log scaling disabled")
+            logger.info("Input log scaling disabled")
+            
+        if data_config.get('output_log_scaling', False):
+            logger.info("Output log scaling enabled: will apply log10 to all output columns (spectra)")
+        else:
+            logger.info("Output log scaling disabled")
         
         data_loader = HDF5DataLoader(
             input_file=data_config['input_file'],
@@ -185,7 +191,8 @@ def main():
             t0_day=data_config.get('t0_day', 5),
             keep_v_outer=data_config.get('keep_v_outer', True),
             limit_nsamples=data_config.get('limit_nsamples', None),
-            log_scaling=data_config.get('log_scaling', False)
+            log_scaling=data_config.get('log_scaling', False),
+            output_log_scaling=data_config.get('output_log_scaling', False)
         )
         
         # Create dataloaders
@@ -236,16 +243,13 @@ def main():
         # Create trainer with callback system
         logger.info("Setting up trainer with callback system...")
         
-        # Pass scalers directly to trainer instead of adding to config
+        # Pass preprocessor to trainer for consistent transformation handling
         scalers = {}
-        if preprocessor is not None and hasattr(preprocessor, 'scaler'):
-            scalers['scaler'] = preprocessor.scaler
-            # For pairwise analysis, we might need input scaler if inputs were preprocessed
-            if hasattr(preprocessor, 'input_scaler'):
-                scalers['input_scaler'] = preprocessor.input_scaler
-            logger.info("Scalers available for diagnostic plotting")
+        if preprocessor is not None:
+            scalers['preprocessor'] = preprocessor
+            logger.info("Preprocessor available for diagnostic plotting and metrics calculation")
         else:
-            logger.info("No scalers available for diagnostic plotting")
+            logger.info("No preprocessor available for diagnostic plotting and metrics calculation")
         
         trainer = Trainer(model, trainer_config, device, directory_manager, scalers=scalers)
         
