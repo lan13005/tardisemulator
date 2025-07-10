@@ -88,7 +88,9 @@ class Trainer:
             )
         
         # Metrics calculator (regression only)
-        self.metrics_calculator = MetricsCalculator('regression')
+        # Get scaler from instance variable if available
+        scaler = self.scalers.get('scaler') if self.scalers else None
+        self.metrics_calculator = MetricsCalculator('regression', scaler=scaler)
         
         # Gradient clipping
         self.grad_clip_value = training_config.get('gradient_clipping', None)
@@ -118,7 +120,7 @@ class Trainer:
                 min_delta=early_stopping_config.get('min_delta', 0.0),
                 mode=early_stopping_config.get('mode', 'min'),
                 restore_best_weights=early_stopping_config.get('restore_best_weights', True),
-                monitor=early_stopping_config.get('monitor', 'val_loss')
+                monitor=early_stopping_config.get('monitor', 'loss') # Class looks for val_metrics[monitor] so it already assumes validation set
             )
             callbacks.append(early_stopping_callback)
         
@@ -132,7 +134,7 @@ class Trainer:
             checkpoint_callback = CheckpointCallback(
                 checkpoint_dir=checkpoint_dir,
                 max_checkpoints=checkpoint_config.get('max_checkpoints', 5),
-                monitor=checkpoint_config.get('monitor', 'val_loss'),
+                monitor=checkpoint_config.get('monitor', 'loss'), # Class looks for val_metrics[monitor] so it already assumes validation set
                 mode=checkpoint_config.get('mode', 'min'),
                 save_best_only=checkpoint_config.get('save_best_only', True)
             )

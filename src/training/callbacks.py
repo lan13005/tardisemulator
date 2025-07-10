@@ -56,7 +56,7 @@ class EarlyStoppingCallback(Callback):
         min_delta: float = 0.0,
         mode: str = 'min',
         restore_best_weights: bool = True,
-        monitor: str = 'val_loss'
+        monitor: str = 'loss'
     ):
         """Initialize EarlyStoppingCallback.
         
@@ -129,7 +129,7 @@ class CheckpointCallback(Callback):
         self,
         checkpoint_dir: str = 'checkpoints',
         max_checkpoints: int = 5,
-        monitor: str = 'val_loss',
+        monitor: str = 'loss',
         mode: str = 'min',
         save_best_only: bool = True
     ):
@@ -169,10 +169,11 @@ class CheckpointCallback(Callback):
         # Save checkpoint
         if not self.save_best_only or is_best:
             checkpoint_metrics = val_metrics if val_metrics else train_metrics
-            self.checkpoint_manager.save_checkpoint(
+            checkpoint_path = self.checkpoint_manager.save_checkpoint(
                 trainer.model, trainer.optimizer, trainer.scheduler, 
                 epoch, checkpoint_metrics, is_best
             )
+            self.logger.info(f"Saved checkpoint to {checkpoint_path}")
 
 
 class LoggingCallback(Callback):

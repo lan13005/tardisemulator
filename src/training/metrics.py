@@ -9,13 +9,15 @@ import logging
 class MetricsCalculator:
     """Calculate evaluation metrics for model performance - optimized for regression tasks."""
     
-    def __init__(self, task_type: str = 'regression'):
+    def __init__(self, task_type: str = 'regression', scaler: Optional[Any] = None):
         """Initialize MetricsCalculator.
         
         Args:
             task_type: Type of task (only 'regression' supported)
+            scaler: Optional scaler for inverse transformation of predictions and targets
         """
         self.task_type = task_type
+        self.scaler = scaler
         self.logger = logging.getLogger('pytorch_pipeline')
         
         # Validate task type
@@ -42,6 +44,8 @@ class MetricsCalculator:
             - mae: Mean Absolute Error averaged across all samples and wavelengths  
             - mae_mean_samples: Mean of MAE per sample (average over wavelengths, then mean over samples)
             - mae_max_samples: Maximum of MAE per sample (average over wavelengths, then max over samples)
+            - mape_mean_samples: Mean of MAPE per sample on untransformed data (if scaler available)
+            - mape_max_samples: Maximum of MAPE per sample on untransformed data (if scaler available)
         """
         # Convert to numpy for calculations
         pred_np = predictions.detach().cpu().numpy()
@@ -69,12 +73,48 @@ class MetricsCalculator:
         # Maximum of MAE per sample  
         mae_max_samples = np.max(mae_per_sample)
         
-        return {
+        # Calculate MAPE on untransformed data if scaler is available
+        mape_mean_samples = None
+        mape_max_samples = None
+        
+        if self.scaler is not None:
+            try:
+                # Inverse transform predictions and targets to get untransformed values
+                pred_original = self.scaler.inverse_transform(pred_np)
+                target_original = self.scaler.inverse_transform(target_np)
+                
+                # Calculate MAPE per sample: mean(|(target - pred) / target| * 100)
+                # Handle division by zero by adding small epsilon
+                epsilon = 1e-8
+                mape_per_sample = np.mean(
+                    np.abs((target_original - pred_original) / (target_original + epsilon)) * 100, 
+                    axis=1
+                )  # Shape: (samples,)
+                
+                # Mean of MAPE per sample
+                mape_mean_samples = np.mean(mape_per_sample)
+                
+                # Maximum of MAPE per sample
+                mape_max_samples = np.max(mape_per_sample)
+                
+            except Exception as e:
+                self.logger.warning(f"Failed to calculate MAPE on untransformed data: {e}")
+                mape_mean_samples = None
+                mape_max_samples = None
+        
+        metrics = {
             'mse': float(mse),                          # Global MSE across all samples and wavelengths
             'mae': float(mae),                          # Global MAE across all samples and wavelengths
-            'mae_mean_samples': float(mae_mean_samples), # Mean of per-sample MAE (avg over wavelengths, then mean over samples)
-            'mae_max_samples': float(mae_max_samples)   # Max of per-sample MAE (avg over wavelengths, then max over samples)
+            'mae_mean': float(mae_mean_samples), # Mean of per-sample MAE (avg over wavelengths, then mean over samples)
+            'mae_max': float(mae_max_samples)   # Max of per-sample MAE (avg over wavelengths, then max over samples)
         }
+        
+        # Add MAPE metrics if available
+        if mape_mean_samples is not None:
+            metrics['mape_mean'] = float(mape_mean_samples)  # Mean of per-sample MAPE on untransformed data
+            metrics['mape_max'] = float(mape_max_samples)    # Max of per-sample MAPE on untransformed data
+        
+        return metrics
     
     def format_metrics(self, metrics: Dict[str, float], precision: int = 6) -> str:
         """Format metrics for logging.
